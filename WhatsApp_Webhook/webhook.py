@@ -98,7 +98,7 @@ Extra: {BUSINESS_EXTRA}
 {faq}
 RULES:
 1. Answer ONLY using info above. Never make things up.
-2. Reply in same language as customer (Hindi/English/Hinglish).
+2. Always reply in English by default. ONLY switch to Hinglish if the customer explicitly asks for Hindi (e.g. "Hindi mein baat karo", "hindi me batao"). Never switch based on the language they message in.
 3. Keep replies SHORT - max 4 lines. This is WhatsApp.
 4. Be warm and friendly.
 5. If asked something you do not know -> reply only: COLLECT_LEAD
@@ -123,7 +123,7 @@ def get_ai_reply(sender, user_msg):
 def fallback_reply(msg):
     m = msg.lower()
     if any(w in m for w in ["hello","hi","namaste","hey","hii"]):
-        return f"Namaste! Welcome to {BUSINESS_NAME}. Kaise help kar sakta hoon?"
+        return f"Hello! Welcome to {BUSINESS_NAME}. How can I help you today?"
     if any(w in m for w in ["timing","time","open","kab","baje","hours"]):
         return f"Timings: {BUSINESS_TIMINGS}" if BUSINESS_TIMINGS else "COLLECT_LEAD"
     if any(w in m for w in ["address","location","kahan","where"]):
@@ -135,53 +135,53 @@ def fallback_reply(msg):
     if any(w in m for w in ["order","lena","chahiye","delivery"]):
         return "TAKE_ORDER" if ENABLE_ORDERS else "COLLECT_LEAD"
     if any(w in m for w in ["thanks","shukriya","ok","theek","done","bye"]):
-        return "Shukriya! Aur kuch chahiye toh batayein."
+        return "Thank you! Feel free to ask if you need anything else."
     return "COLLECT_LEAD"
 
 def handle_lead_flow(sender, msg, state):
     if state["step"] == 1:
         state["data"]["name"] = msg; state["step"] = 2
-        return "Aur aapka phone number?"
+        return "And your phone number?"
     elif state["step"] == 2:
         save_lead(sender, state["data"]["name"], msg, state["data"].get("query",""))
         name = state["data"]["name"]
         del states[sender]
-        return f"Shukriya {name} ji! {BUSINESS_NAME} ki taraf se aapko jald call karenge."
+        return f"Thank you {name}! Someone from {BUSINESS_NAME} will call you shortly."
 
 def handle_appointment_flow(sender, msg, state):
     step = state["step"]
     if step == 1:
         state["data"]["name"] = msg; state["step"] = 2
-        return "Aur aapka phone number?"
+        return "And your phone number?"
     elif step == 2:
         state["data"]["phone"] = msg; state["step"] = 3
-        return "Kaunsi date pasand hai? (e.g. 15 June)"
+        return "What date works for you? (e.g. 15 June)"
     elif step == 3:
         state["data"]["date"] = msg; state["step"] = 4
-        return "Kaunsa time? (e.g. 11am, 3pm)"
+        return "What time works best? (e.g. 11am, 3pm)"
     elif step == 4:
         state["data"]["time"] = msg; state["step"] = 5
-        return "Koi special note? (ya 'no' type karein)"
+        return "Any special notes? (or type 'no')"
     elif step == 5:
         notes = "" if msg.lower() in ["no","nahi","na","n"] else msg
         d = state["data"]
         save_appointment(sender, d["name"], d["phone"], d["date"], d["time"], notes)
         del states[sender]
-        return f"Appointment confirmed! {d['name']} | {d['date']} at {d['time']}. Hum jald confirm karenge."
+        return f"Appointment confirmed! {d['name']} | {d['date']} at {d['time']}. We will confirm shortly."
 
 def handle_order_flow(sender, msg, state):
     step = state["step"]
     if step == 1:
         state["data"]["items"] = msg; state["step"] = 2
-        return "Aapka naam?"
+        return "Your name please?"
     elif step == 2:
         state["data"]["name"] = msg; state["step"] = 3
-        return "Phone number?"
+        return "Your phone number?"
     elif step == 3:
         d = state["data"]
         save_order(sender, d["name"], msg, d["items"], "")
         del states[sender]
-        return f"Order received! Items: {d['items']}. Hum {msg} pe call karenge."
+        return f"Order received! Items: {d['items']}. We will call you on {msg} to confirm."
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -204,21 +204,21 @@ def webhook():
         reply = get_ai_reply(sender, body)
         if "COLLECT_LEAD" in reply:
             states[sender] = {"flow":"lead","step":1,"data":{"query":body}}
-            reply = "Yeh query main owner tak pahunchaata hoon. Aapka naam?"
+            reply = "Let me connect you with our team! May I know your name?"
         elif "BOOK_APPOINTMENT" in reply:
             if ENABLE_APPOINTMENTS:
                 states[sender] = {"flow":"appointment","step":1,"data":{}}
-                reply = "Zaroor! Appointment book karte hain. Aapka naam?"
+                reply = "Sure! Let me book an appointment for you. Your name please?"
             else:
                 states[sender] = {"flow":"lead","step":1,"data":{"query":body}}
-                reply = "Hum callback arrange karte hain. Aapka naam?"
+                reply = "Let me arrange a callback. Your name please?"
         elif "TAKE_ORDER" in reply:
             if ENABLE_ORDERS:
                 states[sender] = {"flow":"order","step":1,"data":{}}
                 reply = f"Kya order karna chahenge?\n{BUSINESS_SERVICES}"
             else:
                 states[sender] = {"flow":"lead","step":1,"data":{"query":body}}
-                reply = "Aapka order note karte hain. Aapka naam?"
+                reply = "Let me note your order. Your name please?"
 
     log_message(sender, "bot", reply)
     resp.message(reply)
