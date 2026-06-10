@@ -5,6 +5,12 @@ import plotly.graph_objects as go
 from datetime import date, datetime, timedelta
 import random
 
+try:
+    from fpdf import FPDF
+    FPDF_AVAILABLE = True
+except ImportError:
+    FPDF_AVAILABLE = False
+
 st.set_page_config(page_title="Retail Analytics Dashboard", page_icon="📊", layout="wide")
 
 st.markdown("""
@@ -16,7 +22,7 @@ st.markdown("""
     background: #161b22; border: 1px solid #30363d;
     border-radius: 12px; padding: 16px !important;
 }
-[data-testid="stMetricValue"] { color: #58a6ff !important; font-size: 28px !important; font-weight: 700 !important; }
+[data-testid="stMetricValue"] { color: #58a6ff !important; font-size: 26px !important; font-weight: 700 !important; }
 [data-testid="stMetricLabel"] { color: #8b949e !important; }
 h1, h2, h3, h4 { color: #e6edf3 !important; }
 hr { border-color: #30363d !important; }
@@ -38,8 +44,6 @@ hr { border-color: #30363d !important; }
 .insight-title { color: #58a6ff; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .insight-val { color: #e6edf3; font-size: 22px; font-weight: 700; }
 .insight-sub { color: #8b949e; font-size: 12px; margin-top: 2px; }
-.badge-green { background: #1a3a2a; color: #3fb950; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
-.badge-red { background: #3a1a1a; color: #f85149; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
 .month-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .month-table th { background: #21262d; color: #8b949e; padding: 8px 12px; text-align: left; font-weight: 600; }
 .month-table td { padding: 8px 12px; border-bottom: 1px solid #21262d; color: #e6edf3; }
@@ -48,6 +52,32 @@ hr { border-color: #30363d !important; }
 .stock-name { color: #e6edf3; font-size: 14px; font-weight: 600; }
 .stock-vel { color: #ffa657; font-size: 13px; }
 .stock-action { background: #1a3a2a; color: #3fb950; border-radius: 6px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+.cmp-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+    padding: 18px 20px; text-align: center;
+}
+.cmp-label { color: #8b949e; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.cmp-a { color: #58a6ff; font-size: 22px; font-weight: 700; }
+.cmp-b { color: #d2a8ff; font-size: 22px; font-weight: 700; }
+.cmp-diff-pos { color: #3fb950; font-size: 13px; margin-top: 4px; }
+.cmp-diff-neg { color: #f85149; font-size: 13px; margin-top: 4px; }
+.cmp-diff-neu { color: #8b949e; font-size: 13px; margin-top: 4px; }
+.loyal-row { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 16px; margin: 4px 0; display: flex; justify-content: space-between; align-items: center; }
+.loyal-name { color: #e6edf3; font-size: 14px; font-weight: 600; }
+.loyal-visits { color: #8b949e; font-size: 12px; }
+.loyal-spend { color: #3fb950; font-size: 14px; font-weight: 700; }
+.report-box {
+    background: linear-gradient(135deg, #0f2d1a, #161b22);
+    border: 1px solid #3fb950; border-radius: 12px;
+    padding: 24px 28px; margin: 16px 0;
+    font-size: 15px; line-height: 1.9; color: #e6edf3;
+}
+.report-title { color: #3fb950; font-size: 13px; font-weight: 700; letter-spacing: 1px; margin-bottom: 14px; text-transform: uppercase; }
+.report-rec {
+    background: rgba(88,166,255,0.08); border-left: 4px solid #58a6ff;
+    border-radius: 6px; padding: 12px 16px; margin-top: 14px;
+    font-size: 14px; color: #79c0ff;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -122,7 +152,6 @@ ALL_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
 
 
 def _guess_cols(file_cols):
-    """Auto-suggest a column for each standard field based on name similarity."""
     lc = {c.lower().strip(): c for c in file_cols}
     hints = {
         "DateTime":      ["datetime","date","timestamp","time","order_time","created_at",
@@ -135,8 +164,7 @@ def _guess_cols(file_cols):
         "Category":      ["category","cat","type","product_type","segment","dept","department","section","group"],
         "Customer":      ["customer","cust","customer_id","customer_name","buyer","client",
                           "cust_name","cust_id","mobile","phone","contact"],
-        "Payment":       ["payment","payment_method","mode","pay_mode","payment_mode","tender",
-                          "pay_type","transaction_mode"],
+        "Payment":       ["payment","payment_method","mode","pay_mode","payment_mode","tender","pay_type"],
     }
     guesses = {}
     for field, keywords in hints.items():
@@ -147,7 +175,9 @@ def _guess_cols(file_cols):
     return guesses
 
 
-# ── SIDEBAR ──
+# ────────────────────────────────────────────
+# SIDEBAR
+# ────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## Retail Analytics")
     st.markdown("---")
@@ -163,15 +193,37 @@ with st.sidebar:
                 del st.session_state[_mkey]
                 st.rerun()
     st.markdown("---")
-    period = st.radio("View Period", ["Last 7 Days","Last 30 Days","Last 90 Days","Full Year"])
-    days = {"Last 7 Days":7,"Last 30 Days":30,"Last 90 Days":90,"Full Year":365}[period]
+
+    compare_mode = st.toggle("📊 Compare Periods", value=False)
+
+    if compare_mode:
+        data_max = st.session_state.get("data_max_date", date.today())
+        data_min = st.session_state.get("data_min_date", date.today() - timedelta(days=730))
+        st.markdown("**Period A**")
+        a_start = st.date_input("A — Start", value=data_max - timedelta(days=30),
+                                min_value=data_min, max_value=data_max, key="cmp_a_start")
+        a_end   = st.date_input("A — End",   value=data_max,
+                                min_value=data_min, max_value=data_max, key="cmp_a_end")
+        st.markdown("**Period B**")
+        b_start = st.date_input("B — Start", value=data_max - timedelta(days=61),
+                                min_value=data_min, max_value=data_max, key="cmp_b_start")
+        b_end   = st.date_input("B — End",   value=data_max - timedelta(days=31),
+                                min_value=data_min, max_value=data_max, key="cmp_b_end")
+        days = max((a_end - a_start).days + 1, 1)
+    else:
+        a_start = a_end = b_start = b_end = None
+        period = st.radio("View Period", ["Last 7 Days","Last 30 Days","Last 90 Days","Full Year"])
+        days = {"Last 7 Days":7,"Last 30 Days":30,"Last 90 Days":90,"Full Year":365}[period]
+
     st.markdown("---")
     lang = st.radio("Summary Language", ["English", "Hinglish"])
     st.markdown("---")
     st.caption("Demo mode — upload CSV to see real numbers.")
 
 
-# ── LOAD DATA ──
+# ────────────────────────────────────────────
+# LOAD DATA
+# ────────────────────────────────────────────
 if uploaded:
     try:
         df_raw_upload = (pd.read_csv(uploaded) if uploaded.name.endswith(".csv")
@@ -184,25 +236,19 @@ if uploaded:
     mapping_key = "col_mapping_" + uploaded.name
 
     if mapping_key not in st.session_state:
-        # ── COLUMN MAPPING FORM ──
         st.markdown("## Map Your Data Columns")
         st.caption(
             "Your file has **" + str(len(file_cols)) + " column" +
             ("s" if len(file_cols) != 1 else "") + "**: `" +
             "`, `".join(file_cols) + "`  \n"
-            "Match each field below to the right column. "
-            "Required fields are marked **✱**."
+            "Match each field below. Required fields are marked **✱**."
         )
         st.markdown("")
-
         guesses = _guess_cols(file_cols)
         sel = {}
-
         with st.form("col_mapping_form"):
             col_a, col_b = st.columns(2)
-            field_items = list(ALL_FIELDS.items())
-
-            for i, (field, desc) in enumerate(field_items):
+            for i, (field, desc) in enumerate(ALL_FIELDS.items()):
                 is_optional = field in OPTIONAL_FIELDS
                 null_option = "Not available" if is_optional else "— select —"
                 options = [null_option] + file_cols
@@ -211,19 +257,9 @@ if uploaded:
                 target_col = col_a if i % 2 == 0 else col_b
                 with target_col:
                     label = field + ("  *(optional)*" if is_optional else "  ✱")
-                    sel[field] = st.selectbox(
-                        label,
-                        options=options,
-                        index=default_idx,
-                        help=desc,
-                    )
-
+                    sel[field] = st.selectbox(label, options=options, index=default_idx, help=desc)
             st.markdown("")
-            submitted = st.form_submit_button(
-                "✅  Apply Mapping & Run Dashboard",
-                use_container_width=True,
-            )
-
+            submitted = st.form_submit_button("✅  Apply Mapping & Run Dashboard", use_container_width=True)
         if submitted:
             missing = [f for f in REQUIRED_FIELDS if sel.get(f) == "— select —"]
             if missing:
@@ -231,21 +267,18 @@ if uploaded:
             else:
                 st.session_state[mapping_key] = {f: sel[f] for f in ALL_FIELDS}
                 st.rerun()
-
         st.stop()
 
-    # ── APPLY STORED MAPPING ──
     mapping = st.session_state[mapping_key]
     rename_dict = {
         mapping[f]: f
         for f in ALL_FIELDS
         if mapping.get(f) not in ("Not available", "— select —", None, "")
         and mapping[f] in df_raw_upload.columns
-        and mapping[f] != f  # skip if column already has the standard name
+        and mapping[f] != f
     }
     df_raw = df_raw_upload.rename(columns=rename_dict)
 
-    # Parse DateTime into derived columns
     if "DateTime" in df_raw.columns:
         df_raw["DateTime"] = pd.to_datetime(df_raw["DateTime"], errors="coerce")
         df_raw["Date"]      = df_raw["DateTime"].dt.date
@@ -253,52 +286,147 @@ if uploaded:
         df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
         df_raw["DayNum"]    = df_raw["DateTime"].dt.dayofweek
 
-    # Compute Revenue if not already present
     if "Revenue" not in df_raw.columns:
         if "Selling_Price" in df_raw.columns and "Qty" in df_raw.columns:
-            df_raw["Revenue"] = (
-                pd.to_numeric(df_raw["Selling_Price"], errors="coerce") *
-                pd.to_numeric(df_raw["Qty"], errors="coerce")
-            )
+            df_raw["Revenue"] = (pd.to_numeric(df_raw["Selling_Price"], errors="coerce") *
+                                 pd.to_numeric(df_raw["Qty"], errors="coerce"))
         elif "Selling_Price" in df_raw.columns:
             df_raw["Revenue"] = pd.to_numeric(df_raw["Selling_Price"], errors="coerce")
 
     using_real = True
-
 else:
     df_raw = make_sample()
     using_real = False
 
-
 max_date = df_raw["Date"].max()
-cutoff = max_date - timedelta(days=days)
-prev_cutoff = cutoff - timedelta(days=days)
-df = df_raw[df_raw["Date"] >= cutoff].copy()
-df_prev = df_raw[(df_raw["Date"] >= prev_cutoff) & (df_raw["Date"] < cutoff)].copy()
+st.session_state["data_max_date"] = max_date
+st.session_state["data_min_date"] = df_raw["Date"].min()
 
 
-# ── HEADER ──
+# ────────────────────────────────────────────
+# PERIOD FILTERING
+# ────────────────────────────────────────────
+if compare_mode and a_start and a_end and b_start and b_end:
+    df      = df_raw[(df_raw["Date"] >= a_start) & (df_raw["Date"] <= a_end)].copy()
+    df_b    = df_raw[(df_raw["Date"] >= b_start) & (df_raw["Date"] <= b_end)].copy()
+    df_prev = df_b
+else:
+    cutoff      = max_date - timedelta(days=days)
+    prev_cutoff = cutoff - timedelta(days=days)
+    df      = df_raw[df_raw["Date"] >= cutoff].copy()
+    df_prev = df_raw[(df_raw["Date"] >= prev_cutoff) & (df_raw["Date"] < cutoff)].copy()
+    df_b    = df_prev
+
+
+# ────────────────────────────────────────────
+# HEADER
+# ────────────────────────────────────────────
 c1, c2 = st.columns([4,1])
 with c1:
     st.markdown("# " + shop_name)
     label = "Your real data" if using_real else "Demo - sample retail data"
-    st.caption(label + " | " + period + " | Updated: " + datetime.now().strftime("%d %b %Y, %I:%M %p"))
+    st.caption(label + " | Updated: " + datetime.now().strftime("%d %b %Y, %I:%M %p"))
 with c2:
     if not using_real:
         st.info("Demo Mode")
 
 st.markdown("---")
 
-# ── CORE NUMBERS ──
-total_rev = df["Revenue"].sum()
-prev_rev = df_prev["Revenue"].sum()
-rev_delta = ((total_rev - prev_rev) / prev_rev * 100) if prev_rev > 0 else 0
+
+# ────────────────────────────────────────────
+# COMPARE PERIODS VIEW (when toggle is on)
+# ────────────────────────────────────────────
+if compare_mode and a_start and b_start:
+    label_a = str(a_start.strftime("%d %b")) + " – " + str(a_end.strftime("%d %b %Y"))
+    label_b = str(b_start.strftime("%d %b")) + " – " + str(b_end.strftime("%d %b %Y"))
+
+    st.markdown("#### Period Comparison")
+    st.caption("**Period A** (blue): " + label_a + "  ·  **Period B** (purple): " + label_b)
+
+    def _cmp_metrics(dfa, dfb):
+        def safe(val): return val if val == val else 0
+        metrics = {}
+        for key, col, fmt in [
+            ("Total Revenue",    "Revenue", lambda v: "Rs {:,}".format(int(v))),
+            ("Transactions",     None,      lambda v: "{:,}".format(int(v))),
+            ("Avg Bill Value",   "Revenue", lambda v: "Rs {:,}".format(int(v))),
+            ("Units Sold",       "Qty",     lambda v: "{:,}".format(int(v))),
+        ]:
+            if key == "Transactions":
+                va, vb = len(dfa), len(dfb)
+            elif key == "Avg Bill Value":
+                va = safe(dfa["Revenue"].mean()) if "Revenue" in dfa.columns else 0
+                vb = safe(dfb["Revenue"].mean()) if "Revenue" in dfb.columns else 0
+            else:
+                va = dfa[col].sum() if col in dfa.columns else 0
+                vb = dfb[col].sum() if col in dfb.columns else 0
+            diff = va - vb
+            pct  = (diff / vb * 100) if vb > 0 else 0
+            metrics[key] = (va, vb, diff, pct, fmt)
+        return metrics
+
+    cmp_data = _cmp_metrics(df, df_b)
+    cols = st.columns(len(cmp_data))
+    for col_obj, (metric, (va, vb, diff, pct, fmt)) in zip(cols, cmp_data.items()):
+        with col_obj:
+            diff_sign = "+" if diff >= 0 else ""
+            diff_class = "cmp-diff-pos" if diff >= 0 else "cmp-diff-neg"
+            if abs(pct) < 0.05:
+                diff_class = "cmp-diff-neu"
+            diff_str = diff_sign + str(round(pct, 1)) + "% (" + diff_sign + fmt(abs(diff)) + ")"
+            st.markdown(
+                "<div class='cmp-card'>"
+                "<div class='cmp-label'>" + metric + "</div>"
+                "<div class='cmp-a'>A: " + fmt(va) + "</div>"
+                "<div class='cmp-b'>B: " + fmt(vb) + "</div>"
+                "<div class='" + diff_class + "'>" + diff_str + "</div>"
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+    st.markdown("")
+
+    # Combined revenue trend — day-offset x-axis so periods overlay cleanly
+    if "Date" in df.columns and "Date" in df_b.columns:
+        daily_a = df.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
+        daily_a["Day"]    = range(1, len(daily_a) + 1)
+        daily_a["Period"] = "Period A (" + label_a + ")"
+
+        daily_b = df_b.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
+        daily_b["Day"]    = range(1, len(daily_b) + 1)
+        daily_b["Period"] = "Period B (" + label_b + ")"
+
+        cmp_daily = pd.concat([daily_a[["Day","Revenue","Period"]], daily_b[["Day","Revenue","Period"]]])
+
+        fig_cmp = px.line(
+            cmp_daily, x="Day", y="Revenue", color="Period",
+            color_discrete_map={
+                "Period A (" + label_a + ")": "#58a6ff",
+                "Period B (" + label_b + ")": "#d2a8ff",
+            },
+            labels={"Day": "Day in Period", "Revenue": "Rs"},
+        )
+        fig_cmp.update_layout(**DARK, height=280,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                        font=dict(color="#8b949e")))
+        fig_cmp.update_traces(line=dict(width=2))
+        st.plotly_chart(fig_cmp, use_container_width=True)
+
+    st.markdown("---")
+
+
+# ────────────────────────────────────────────
+# CORE NUMBERS
+# ────────────────────────────────────────────
+total_rev   = df["Revenue"].sum()
+prev_rev    = df_prev["Revenue"].sum()
+rev_delta   = ((total_rev - prev_rev) / prev_rev * 100) if prev_rev > 0 else 0
 total_orders = len(df)
-prev_orders = len(df_prev)
-ord_delta = ((total_orders - prev_orders) / prev_orders * 100) if prev_orders > 0 else 0
-avg_order = df["Revenue"].mean() if len(df) > 0 else 0
-uniq_cust = df["Customer"].nunique() if "Customer" in df.columns else 0
-total_units = int(df["Qty"].sum()) if "Qty" in df.columns else 0
+prev_orders  = len(df_prev)
+ord_delta    = ((total_orders - prev_orders) / prev_orders * 100) if prev_orders > 0 else 0
+avg_order    = df["Revenue"].mean() if len(df) > 0 else 0
+uniq_cust    = df["Customer"].nunique() if "Customer" in df.columns else 0
+total_units  = int(df["Qty"].sum()) if "Qty" in df.columns else 0
 
 if "Hour" in df.columns and len(df) > 0:
     bh = int(df.groupby("Hour")["Revenue"].sum().idxmax())
@@ -315,16 +443,27 @@ else:
 top_product = str(df.groupby("Product")["Revenue"].sum().idxmax()) if len(df) > 0 else "N/A"
 daily = df.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
 
+# Customer repeat rate
+if "Customer" in df.columns and len(df) > 0:
+    cust_freq    = df.groupby("Customer").size()
+    repeat_count = int((cust_freq > 1).sum())
+    total_custs  = len(cust_freq)
+    repeat_rate  = repeat_count / total_custs * 100 if total_custs > 0 else 0
+    repeat_str   = str(round(repeat_rate, 1)) + "%"
+else:
+    repeat_rate = None
+    repeat_str  = "N/A"
+
 
 # ══════════════════════════════════════════════
 # SECTION 1: PLAIN-ENGLISH / HINGLISH SUMMARY
 # ══════════════════════════════════════════════
 def build_summary(hinglish=False):
-    rev_str = "Rs {:,}".format(int(total_rev))
-    avg_str = "Rs {:,}".format(int(avg_order))
+    rev_str       = "Rs {:,}".format(int(total_rev))
+    avg_str       = "Rs {:,}".format(int(avg_order))
     trend_word_en = "up" if rev_delta >= 0 else "down"
     trend_word_hi = "zyada" if rev_delta >= 0 else "kam"
-    delta_str = str(abs(round(rev_delta, 1))) + "%"
+    delta_str     = str(abs(round(rev_delta, 1))) + "%"
 
     if not hinglish:
         lines = []
@@ -361,7 +500,6 @@ st.markdown(
     build_summary(lang == "Hinglish") + "</div>",
     unsafe_allow_html=True
 )
-
 st.markdown("---")
 
 
@@ -369,29 +507,22 @@ st.markdown("---")
 # SECTION 2: SMART ALERTS
 # ══════════════════════════════════════════════
 st.markdown("#### Alerts & Warnings")
-
 alerts = []
 
 if len(df_raw) > 0 and "Product" in df_raw.columns:
-    # Compare the most recent 7 days in the dataset against the 30 days BEFORE that window.
     ref_cutoff_7   = max_date - timedelta(days=7)
-    ref_cutoff_p30 = max_date - timedelta(days=37)  # 30-day window ending where last-7 begins
-
+    ref_cutoff_p30 = max_date - timedelta(days=37)
     df_7   = df_raw[df_raw["Date"] >= ref_cutoff_7]
     df_p30 = df_raw[(df_raw["Date"] >= ref_cutoff_p30) & (df_raw["Date"] < ref_cutoff_7)]
 
-    # Alert 1: Smart slow-mover — last-7-day velocity vs prior-30-day velocity
     vel_30 = df_p30.groupby("Product")["Qty"].sum() / 30.0
     vel_7  = df_7.groupby("Product")["Qty"].sum() / 7.0
-
     common = vel_30.index.intersection(vel_7.index)
     slow_products = []
     for prod in common:
-        avg_vel    = vel_30[prod]
-        recent_vel = vel_7[prod]
+        avg_vel, recent_vel = vel_30[prod], vel_7[prod]
         if avg_vel > 0.1 and recent_vel < avg_vel * 0.5:
-            drop_pct = int((1 - recent_vel / avg_vel) * 100)
-            slow_products.append((prod, drop_pct))
+            slow_products.append((prod, int((1 - recent_vel / avg_vel) * 100)))
     slow_products.sort(key=lambda x: -x[1])
     for prod, drop in slow_products[:3]:
         msg = "<b>" + prod + "</b> — sales dropped <b>" + str(drop) + "%</b> this week vs the prior 30 days."
@@ -399,7 +530,6 @@ if len(df_raw) > 0 and "Product" in df_raw.columns:
             msg = "<b>" + prod + "</b> ki bikri is hafte <b>" + str(drop) + "%</b> giri hai pichle 30 din ke comparison mein."
         alerts.append(("red", msg))
 
-    # Alert 2: Products that have not sold at all in the last 7 days but sold before
     all_prods    = set(df_raw["Product"].unique())
     recent_prods = set(df_7["Product"].unique()) if len(df_7) > 0 else set()
     dead_prods   = all_prods - recent_prods
@@ -410,10 +540,9 @@ if len(df_raw) > 0 and "Product" in df_raw.columns:
             msg = "Yeh items pichhle 7 din mein bilkul nahi bike: <b>" + dead_list + "</b>. Discount dein ya shelf se hatayein."
         alerts.append(("red", msg))
 
-# Alert 3: Revenue dip on specific days compared to that day's own average
 if "DayOfWeek" in df.columns and len(df) >= 14:
-    day_rev = df.groupby(["Date","DayOfWeek"])["Revenue"].sum().reset_index()
-    dow_avg = day_rev.groupby("DayOfWeek")["Revenue"].mean()
+    day_rev     = df.groupby(["Date","DayOfWeek"])["Revenue"].sum().reset_index()
+    dow_avg     = day_rev.groupby("DayOfWeek")["Revenue"].mean()
     recent_days = day_rev.sort_values("Date").tail(7)
     for _, row in recent_days.iterrows():
         dow = row["DayOfWeek"]
@@ -426,27 +555,26 @@ if "DayOfWeek" in df.columns and len(df) >= 14:
                 alerts.append(("yellow", msg))
                 break
 
-# Alert 4: Discount overuse
 disc_col = next((c for c in ["Discount_Pct","Discount","discount_pct"] if c in df.columns), None)
 if disc_col and len(df) > 0:
-    disc_bills = (df[disc_col] > 0).sum()
-    disc_pct = disc_bills / len(df) * 100
-    if disc_pct > 35:
-        msg = "<b>" + str(int(disc_pct)) + "%</b> of your bills had a discount — this is reducing your profit margin. Review your discount policy."
+    disc_pct_val = (df[disc_col] > 0).sum() / len(df) * 100
+    if disc_pct_val > 35:
+        msg = "<b>" + str(int(disc_pct_val)) + "%</b> of your bills had a discount — this is reducing your profit margin."
         if lang == "Hinglish":
-            msg = "Aapke <b>" + str(int(disc_pct)) + "% bills</b> par discount diya gaya — isse profit kam ho raha hai. Discount policy check karein."
+            msg = "Aapke <b>" + str(int(disc_pct_val)) + "% bills</b> par discount diya gaya — isse profit kam ho raha hai."
         alerts.append(("yellow", msg))
+else:
+    disc_pct_val = 0
 
-# Alert 5: Revenue growing — positive alert
 if rev_delta > 20:
     msg = "Revenue is up <b>" + str(round(rev_delta,1)) + "%</b> vs the previous period. Stock up on fast-moving items!"
     if lang == "Hinglish":
-        msg = "Revenue <b>" + str(round(rev_delta,1)) + "% badhi</b> hai pichle period se. Jo items zyada bik rahe hain unka stock badhayen!"
+        msg = "Revenue <b>" + str(round(rev_delta,1)) + "% badhi</b> hai pichle period se. Fast-moving items ka stock badhayen!"
     alerts.append(("green", msg))
 
 if not alerts:
-    no_alert = "No issues found. Business is running smoothly!" if lang == "English" else "Koi problem nahi mili. Business theek chal raha hai!"
-    alerts.append(("green", no_alert))
+    alerts.append(("green", "No issues found. Business is running smoothly!" if lang == "English"
+                   else "Koi problem nahi mili. Business theek chal raha hai!"))
 
 for atype, amsg in alerts:
     st.markdown("<div class='alert-box alert-" + atype + "'>" + amsg + "</div>", unsafe_allow_html=True)
@@ -454,18 +582,13 @@ for atype, amsg in alerts:
 st.markdown("---")
 
 
-# ── KPI METRICS ──
-m1,m2,m3,m4,m5,m6 = st.columns(6)
+# ── KPI METRICS (7 cards) ──
+m1,m2,m3,m4,m5,m6,m7 = st.columns(7)
 with m1:
-    # Only show delta badge when there is a prior period to compare against
-    rev_delta_label = (
-        ("+" if rev_delta >= 0 else "") + str(round(rev_delta, 1)) + "% vs prev"
-    ) if prev_rev > 0 else None
+    rev_delta_label = (("+" if rev_delta >= 0 else "") + str(round(rev_delta, 1)) + "% vs prev") if prev_rev > 0 else None
     st.metric("Total Revenue", "Rs {:,}".format(int(total_rev)), delta=rev_delta_label)
 with m2:
-    ord_delta_label = (
-        ("+" if ord_delta >= 0 else "") + str(round(ord_delta, 1)) + "% vs prev"
-    ) if prev_orders > 0 else None
+    ord_delta_label = (("+" if ord_delta >= 0 else "") + str(round(ord_delta, 1)) + "% vs prev") if prev_orders > 0 else None
     st.metric("Transactions", "{:,}".format(total_orders), delta=ord_delta_label)
 with m3:
     st.metric("Avg Bill Value", "Rs {:,}".format(int(avg_order)))
@@ -475,8 +598,35 @@ with m5:
     st.metric("Peak Hour", peak_str)
 with m6:
     st.metric("Best Day", best_dow)
+with m7:
+    st.metric("Repeat Rate", repeat_str,
+              help="% of customers who made more than one purchase in this period")
 
 st.markdown("---")
+
+
+# ── TOP 5 LOYAL CUSTOMERS ──
+if "Customer" in df.columns and repeat_rate is not None and len(df) > 0:
+    st.markdown("#### Top 5 Loyal Customers")
+    top_loyal = (
+        df.groupby("Customer")
+          .agg(Visits=("Customer","count"), Total_Spend=("Revenue","sum"))
+          .sort_values("Visits", ascending=False)
+          .head(5)
+          .reset_index()
+    )
+    loy_cols = st.columns(min(len(top_loyal), 5))
+    for i, row in top_loyal.iterrows():
+        with loy_cols[i]:
+            st.markdown(
+                "<div class='loyal-row' style='flex-direction:column;align-items:flex-start'>"
+                "<div class='loyal-name'>" + str(row["Customer"]) + "</div>"
+                "<div class='loyal-visits'>" + str(int(row["Visits"])) + " visits</div>"
+                "<div class='loyal-spend'>Rs {:,}</div>".format(int(row["Total_Spend"])) +
+                "</div>",
+                unsafe_allow_html=True
+            )
+    st.markdown("---")
 
 
 # ── REVENUE TREND + CATEGORY ──
@@ -537,34 +687,27 @@ with col_dow2:
 
 
 # ══════════════════════════════════════════════
-# SECTION 3: STAFF SCHEDULING RECOMMENDATION
+# SECTION 3: STAFF SCHEDULING
 # ══════════════════════════════════════════════
 st.markdown("---")
 st.markdown("#### Staff Scheduling Recommendation")
-
 if "Hour" in df.columns and "DayOfWeek" in df.columns and len(df) > 0:
     hd = df.groupby(["DayOfWeek","Hour"])["Revenue"].agg(["sum","count"]).reset_index()
     hd.columns = ["DayOfWeek","Hour","Revenue","Transactions"]
     hd = hd.sort_values("Transactions", ascending=False).head(5)
-
     def fh2(h):
         if h == 0: return "12am"
         if h < 12: return str(h)+"am"
         if h == 12: return "12pm"
         return str(h-12)+"pm"
-
     staff_cols = st.columns(len(hd))
     for i, (_, row) in enumerate(hd.iterrows()):
         with staff_cols[i]:
-            day = str(row["DayOfWeek"])[:3]
-            hour_label = fh2(int(row["Hour"]))
-            txn = int(row["Transactions"])
-            sub = str(txn) + (" avg bills" if lang == "English" else " bills average")
             st.markdown(
                 "<div class='insight-box' style='text-align:center'>"
                 "<div class='insight-title'>Keep Extra Staff</div>"
-                "<div class='insight-val'>" + day + " " + hour_label + "</div>"
-                "<div class='insight-sub'>" + sub + "</div>"
+                "<div class='insight-val'>" + str(row["DayOfWeek"])[:3] + " " + fh2(int(row["Hour"])) + "</div>"
+                "<div class='insight-sub'>" + str(int(row["Transactions"])) + " avg bills</div>"
                 "</div>",
                 unsafe_allow_html=True
             )
@@ -572,60 +715,56 @@ else:
     st.info("Add DateTime column to get staff scheduling recommendations.")
 
 
-# ══════════════════════════════════════════════
-# SECTION 4: STOCK REORDER RECOMMENDATIONS
-# ══════════════════════════════════════════════
+# ── SECTION 4: STOCK REORDER ──
 st.markdown("---")
 st.markdown("#### Stock Reorder Recommendations")
 st.caption("Based on average daily sales velocity over the selected period")
-
 if "Qty" in df.columns and len(df) > 0:
     vel = df.groupby("Product")["Qty"].sum() / max(days, 1)
     vel = vel.sort_values(ascending=False)
-    top_fast = vel.head(6)
+    top_fast    = vel.head(6)
     bottom_slow = vel[vel > 0].tail(5)
-
     col_fast, col_slow2 = st.columns(2)
     with col_fast:
         st.markdown("**Order More (Fast Movers)**" if lang == "English" else "**Yeh Order Karein (Jaldi Bikne Wale)**")
         for prod, v in top_fast.items():
-            daily_units = round(v, 1)
-            weekly_need = int(v * 7)
             st.markdown(
                 "<div class='stock-card'>"
                 "<div><div class='stock-name'>" + str(prod) + "</div>"
-                "<div class='stock-vel'>" + str(daily_units) + " units/day &rarr; ~" + str(weekly_need) + " needed/week</div></div>"
+                "<div class='stock-vel'>" + str(round(v,1)) + " units/day &rarr; ~" + str(int(v*7)) + " needed/week</div></div>"
                 "<div class='stock-action'>Reorder</div>"
-                "</div>",
-                unsafe_allow_html=True
+                "</div>", unsafe_allow_html=True
             )
-
     with col_slow2:
         st.markdown("**Review Stock (Slow Movers)**" if lang == "English" else "**Stock Ghatayen (Dheere Bikne Wale)**")
         for prod, v in bottom_slow.items():
-            daily_units = round(v, 2)
             st.markdown(
                 "<div class='stock-card'>"
                 "<div><div class='stock-name'>" + str(prod) + "</div>"
-                "<div class='stock-vel'>" + str(daily_units) + " units/day — consider discount or less stock</div></div>"
+                "<div class='stock-vel'>" + str(round(v,2)) + " units/day -- consider discount or less stock</div></div>"
                 "<div style='background:#2d1a00;color:#ffa657;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600'>Review</div>"
-                "</div>",
-                unsafe_allow_html=True
+                "</div>", unsafe_allow_html=True
             )
 
 
-# ── PRODUCT TABLE + SLOW MOVERS ──
+# ── PRODUCT TABLES ──
 st.markdown("---")
 col_prod, col_slow3 = st.columns(2)
 with col_prod:
     st.markdown("#### Top Selling Products")
-    ps = df.groupby("Product").agg(Units=("Qty","sum"),Revenue=("Revenue","sum"),Bills=("Product","count")).sort_values("Revenue",ascending=False).head(15).reset_index()
+    ps = (df.groupby("Product")
+            .agg(Units=("Qty","sum"), Revenue=("Revenue","sum"), Bills=("Product","count"))
+            .sort_values("Revenue", ascending=False)
+            .head(15).reset_index())
     ps["Revenue"] = ps["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
     st.dataframe(ps, use_container_width=True, hide_index=True, height=300)
 
 with col_slow3:
-    st.markdown("#### Bottom Sellers (Consider Action)")
-    slow = df.groupby("Product").agg(Units=("Qty","sum"),Revenue=("Revenue","sum")).sort_values("Units").head(10).reset_index()
+    st.markdown("#### Bottom Sellers by Revenue (Consider Action)")
+    slow = (df.groupby("Product")
+              .agg(Units=("Qty","sum"), Revenue=("Revenue","sum"))
+              .sort_values("Revenue", ascending=True)
+              .head(10).reset_index())
     slow["Revenue"] = slow["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
     st.dataframe(slow, use_container_width=True, hide_index=True, height=300)
 
@@ -644,92 +783,56 @@ if pay_col2:
         st.plotly_chart(fig6, use_container_width=True)
 
 
-# ══════════════════════════════════════════════
-# SECTION 5: MONTHLY COMPARISON TABLE
-# ══════════════════════════════════════════════
+# ── MONTHLY COMPARISON TABLE ──
 st.markdown("---")
 st.markdown("#### Monthly Performance Comparison")
-
 if len(df_raw) > 0:
     dm = df_raw.copy()
     dm["Date"] = pd.to_datetime(dm["Date"])
     dm["Month"] = dm["Date"].dt.to_period("M")
-    monthly = dm.groupby("Month").agg(
-        Revenue=("Revenue","sum"),
-        Bills=("Revenue","count"),
-        Avg_Bill=("Revenue","mean"),
-    ).reset_index()
+    monthly = dm.groupby("Month").agg(Revenue=("Revenue","sum"), Bills=("Revenue","count"), Avg_Bill=("Revenue","mean")).reset_index()
     monthly["Month"] = monthly["Month"].astype(str)
     monthly = monthly.sort_values("Month")
-
-    max_rev = monthly["Revenue"].max()
-    min_rev = monthly["Revenue"].min()
-
+    max_rev_m, min_rev_m = monthly["Revenue"].max(), monthly["Revenue"].min()
     header = "<tr><th>Month</th><th>Total Revenue</th><th>Avg Bill Value</th><th>No. of Bills</th><th>vs Prev Month</th></tr>"
     rows_html = ""
     prev_rev_m = None
     for _, row in monthly.iterrows():
-        rev = int(row["Revenue"])
-        avg_b = int(row["Avg_Bill"])
-        bills = int(row["Bills"])
-        month_str = str(row["Month"])
-
+        rev, avg_b, bills = int(row["Revenue"]), int(row["Avg_Bill"]), int(row["Bills"])
         if prev_rev_m is not None and prev_rev_m > 0:
             chg = (rev - prev_rev_m) / prev_rev_m * 100
             chg_str = ("+" if chg >= 0 else "") + str(round(chg,1)) + "%"
-            chg_color = "#3fb950" if chg >= 0 else "#f85149"
-            vs_cell = "<span style='color:" + chg_color + ";font-weight:600'>" + chg_str + "</span>"
+            vs_cell = "<span style='color:" + ("#3fb950" if chg >= 0 else "#f85149") + ";font-weight:600'>" + chg_str + "</span>"
         else:
-            vs_cell = "<span style='color:#8b949e'>—</span>"
-
-        intensity = int((rev - min_rev) / max(max_rev - min_rev, 1) * 200)
+            vs_cell = "<span style='color:#8b949e'>--</span>"
+        intensity = int((rev - min_rev_m) / max(max_rev_m - min_rev_m, 1) * 200)
         bg = "rgba(88," + str(100 + intensity) + ",255,0.08)"
-
-        rows_html += (
-            "<tr style='background:" + bg + "'>"
-            "<td>" + month_str + "</td>"
-            "<td><b>Rs {:,}</b></td>".format(rev) +
-            "<td>Rs {:,}</td>".format(avg_b) +
-            "<td>" + str(bills) + "</td>"
-            "<td>" + vs_cell + "</td>"
-            "</tr>"
-        )
+        rows_html += ("<tr style='background:" + bg + "'><td>" + str(row["Month"]) + "</td>"
+                      "<td><b>Rs {:,}</b></td>".format(rev) +
+                      "<td>Rs {:,}</td>".format(avg_b) +
+                      "<td>" + str(bills) + "</td><td>" + vs_cell + "</td></tr>")
         prev_rev_m = rev
-
-    st.markdown(
-        "<table class='month-table'>" + header + rows_html + "</table>",
-        unsafe_allow_html=True
-    )
+    st.markdown("<table class='month-table'>" + header + rows_html + "</table>", unsafe_allow_html=True)
     st.caption("Darker blue = higher revenue month")
 
 
 # ── WEEKLY BAR ──
 st.markdown("---")
 st.markdown("#### Weekly Revenue (last 12 weeks)")
-
 def _fmt_week(p_str):
-    """Convert '2024-10-14/2024-10-20' → 'Oct 14–20' (or 'Oct 28–Nov 3' for month boundaries)."""
     parts = p_str.split("/")
-    sd = pd.to_datetime(parts[0])
-    ed = pd.to_datetime(parts[1])
+    sd, ed = pd.to_datetime(parts[0]), pd.to_datetime(parts[1])
     if sd.month == ed.month:
-        return sd.strftime("%b ") + str(sd.day) + "–" + str(ed.day)
-    return sd.strftime("%b ") + str(sd.day) + "–" + ed.strftime("%b ") + str(ed.day)
+        return sd.strftime("%b ") + str(sd.day) + "-" + str(ed.day)
+    return sd.strftime("%b ") + str(sd.day) + "-" + ed.strftime("%b ") + str(ed.day)
 
 dw2 = df_raw.copy()
-dw2["Date"] = pd.to_datetime(dw2["Date"])
+dw2["Date"]    = pd.to_datetime(dw2["Date"])
 dw2["_period"] = dw2["Date"].dt.to_period("W").astype(str)
 dw2["Week"]    = dw2["_period"].apply(_fmt_week)
-
-wk = dw2.groupby(["_period","Week"])["Revenue"].sum().reset_index()
-wk = wk.sort_values("_period").tail(12)
-
-fig5 = px.bar(
-    wk, x="Week", y="Revenue",
-    color_discrete_sequence=["#d2a8ff"],
-    labels={"Revenue":"Rs","Week":""},
-    category_orders={"Week": wk["Week"].tolist()},
-)
+wk = dw2.groupby(["_period","Week"])["Revenue"].sum().reset_index().sort_values("_period").tail(12)
+fig5 = px.bar(wk, x="Week", y="Revenue", color_discrete_sequence=["#d2a8ff"],
+              labels={"Revenue":"Rs","Week":""}, category_orders={"Week": wk["Week"].tolist()})
 fig5.update_layout(**DARK, height=220)
 fig5.update_traces(marker_line_width=0)
 st.plotly_chart(fig5, use_container_width=True)
@@ -741,5 +844,212 @@ _, col_dl = st.columns([3,1])
 with col_dl:
     csv_out = df.to_csv(index=False)
     safe = shop_name.replace(" ","_")
-    fname = safe + "_" + str(max_date) + ".csv"
-    st.download_button("Export Filtered Data as CSV", data=csv_out, file_name=fname, mime="text/csv")
+    st.download_button("Export Filtered Data as CSV", data=csv_out,
+                       file_name=safe + "_" + str(max_date) + ".csv", mime="text/csv")
+
+
+# ── SECTION 6: GENERATE SUMMARY REPORT ──
+st.markdown("---")
+st.markdown("#### Business Summary Report")
+st.caption("Generate a plain-English report a shop owner can read and act on immediately.")
+
+
+def _build_report_text(df_r, df_raw_r, shop_r, days_r):
+    parts = []
+    rev   = df_r["Revenue"].sum() if "Revenue" in df_r.columns else 0
+    bills = len(df_r)
+    avg_b = rev / bills if bills > 0 else 0
+
+    parts.append(
+        "{shop} generated a total revenue of Rs {rev:,} from {bills:,} transactions "
+        "over the last {days} days, with an average bill value of Rs {avg:,}.".format(
+            shop=shop_r, rev=int(rev), bills=bills, days=days_r, avg=int(avg_b)
+        )
+    )
+
+    if len(df_raw_r) > 0 and "Revenue" in df_raw_r.columns:
+        dm2 = df_raw_r.copy()
+        dm2["Date"] = pd.to_datetime(dm2["Date"])
+        dm2["Month"] = dm2["Date"].dt.to_period("M").astype(str)
+        mon_rev = dm2.groupby("Month")["Revenue"].sum()
+        if len(mon_rev) >= 2:
+            bm = mon_rev.idxmax()
+            wm = mon_rev.idxmin()
+            mdiff = int((mon_rev[bm] - mon_rev[wm]) / mon_rev[wm] * 100)
+            parts.append(
+                "Looking at monthly performance across your full dataset, your best month was {bm} "
+                "and your weakest was {wm} -- a {d}% difference in revenue between the two.".format(
+                    bm=bm, wm=wm, d=mdiff
+                )
+            )
+
+    top_prod_name = None
+    if "Product" in df_r.columns and "Revenue" in df_r.columns and len(df_r) > 0:
+        pr = df_r.groupby("Product")["Revenue"].sum().sort_values(ascending=False)
+        if len(pr) >= 3:
+            t, b = pr.head(3), pr.tail(3)
+            parts.append(
+                "Your top three revenue-generating products were {p1} (Rs {v1:,}), "
+                "{p2} (Rs {v2:,}), and {p3} (Rs {v3:,}). "
+                "Your three lowest revenue products were {b1}, {b2}, and {b3} -- "
+                "consider whether these need a price review, better placement, or a clearance discount.".format(
+                    p1=t.index[0], v1=int(t.iloc[0]),
+                    p2=t.index[1], v2=int(t.iloc[1]),
+                    p3=t.index[2], v3=int(t.iloc[2]),
+                    b1=b.index[-1], b2=b.index[-2], b3=b.index[-3],
+                )
+            )
+        top_prod_name = pr.index[0] if len(pr) > 0 else None
+
+    day_part = hour_part = ""
+    if "DayOfWeek" in df_r.columns and len(df_r) > 0:
+        day_part = "Your busiest day of the week is {d}".format(
+            d=df_r.groupby("DayOfWeek")["Revenue"].sum().idxmax()
+        )
+    if "Hour" in df_r.columns and len(df_r) > 0:
+        ph = int(df_r.groupby("Hour")["Revenue"].sum().idxmax())
+        hour_part = "your peak selling window is {h}:00 to {h1}:00".format(h=ph, h1=ph+1)
+    if day_part and hour_part:
+        parts.append(day_part + " and " + hour_part +
+                     ". Make sure you have adequate staff and stock available during these times.")
+    elif day_part:
+        parts.append(day_part + ". Plan your staffing schedule accordingly.")
+
+    pay_col_r = next((c for c in ["Payment","Payment_Method","payment"] if c in df_r.columns), None)
+    if pay_col_r and len(df_r) > 0 and "Revenue" in df_r.columns:
+        pay_rev = df_r.groupby(pay_col_r)["Revenue"].sum()
+        top_pay = pay_rev.idxmax()
+        pay_pct = int(pay_rev[top_pay] / pay_rev.sum() * 100)
+        parts.append(
+            "The most popular payment method is {m}, accounting for roughly {p}% of your revenue. "
+            "Make sure your {m} terminal is always working and settlement is checked daily.".format(
+                m=top_pay, p=pay_pct
+            )
+        )
+
+    rr_val = None
+    if "Customer" in df_r.columns and len(df_r) > 0:
+        cf = df_r.groupby("Customer").size()
+        rr_val = (cf > 1).mean() * 100
+        tc = df_r.groupby("Customer")["Revenue"].sum()
+        top_c, top_c_spend = tc.idxmax(), int(tc.max())
+        loyalty_note = (
+            "This is a healthy loyalty rate -- your regulars are a strong foundation."
+            if rr_val >= 30 else
+            "There is room to grow -- a simple loyalty offer or WhatsApp follow-up can bring customers back."
+            if rr_val >= 15 else
+            "Most customers are visiting only once. A loyalty programme or post-purchase message could significantly improve this."
+        )
+        parts.append(
+            "{r}% of your customers made more than one purchase this period. "
+            "{note} Your most valuable customer is {c}, with a total spend of Rs {s:,}.".format(
+                r=round(rr_val, 1), note=loyalty_note, c=top_c, s=top_c_spend
+            )
+        )
+
+    disc_col_r = next((c for c in ["Discount_Pct","Discount","discount_pct"] if c in df_r.columns), None)
+    disc_val = ((df_r[disc_col_r] > 0).mean() * 100) if disc_col_r else 0
+
+    if rr_val is not None and rr_val < 20:
+        rec = (
+            "Focus on customer retention. Only {r}% of customers returned this period. "
+            "A simple punch-card loyalty scheme, a 10% discount on the next visit, or a brief "
+            "WhatsApp message after purchase can double your repeat rate within weeks. "
+            "Keeping an existing customer is five times cheaper than finding a new one.".format(r=round(rr_val,1))
+        )
+    elif disc_val > 35:
+        rec = (
+            "Review your discount policy. Over {d}% of bills include a discount, directly cutting your margins. "
+            "Try replacing blanket discounts with bundle offers (buy 2 get 10% off) or loyalty rewards -- "
+            "you keep more revenue while still giving customers a reason to buy.".format(d=int(disc_val))
+        )
+    elif top_prod_name:
+        rec = (
+            "Double down on your best-seller: {p}. Never run out of stock on this item -- "
+            "stockouts on top-sellers are one of the most common causes of lost revenue. "
+            "Consider placing it at eye level near the entrance or checkout to drive impulse purchases.".format(
+                p=top_prod_name
+            )
+        )
+    else:
+        rec = (
+            "Review your product mix monthly and keep your best-sellers well-stocked. "
+            "A clean, clearly priced store with consistent opening hours builds trust and drives repeat visits."
+        )
+
+    return parts, rec
+
+
+if "summary_generated" not in st.session_state:
+    st.session_state.summary_generated = False
+
+col_gen, _ = st.columns([1, 3])
+with col_gen:
+    if st.button("Generate Business Summary Report", use_container_width=True, type="primary"):
+        st.session_state.summary_generated = True
+
+if st.session_state.summary_generated:
+    paragraphs, recommendation = _build_report_text(df, df_raw, shop_name, days)
+
+    body_html = "".join("<p style='margin:0 0 12px 0'>" + p + "</p>" for p in paragraphs)
+    rec_html  = "<div class='report-rec'><b>Key Recommendation:</b> " + recommendation + "</div>"
+    report_date = datetime.now().strftime("%d %b %Y")
+
+    st.markdown(
+        "<div class='report-box'>"
+        "<div class='report-title'>Business Intelligence Report -- " + report_date + "</div>"
+        + body_html + rec_html +
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+    if FPDF_AVAILABLE:
+        def _build_pdf(paras, rec, sname):
+            def clean(t):
+                return (t.replace("Rs", "Rs")
+                         .replace("’","'").replace("‘","'")
+                         .replace("“",'"').replace("”",'"')
+                         .replace("–","-").replace("—","-")
+                         .replace("•","*").replace(" "," "))
+            pdf = FPDF()
+            pdf.set_margins(20, 20, 20)
+            pdf.add_page()
+            pdf.set_font("Helvetica", "B", 20)
+            pdf.set_text_color(30, 30, 30)
+            pdf.cell(0, 12, clean(sname), ln=True)
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_text_color(120, 120, 120)
+            pdf.cell(0, 8, "Business Intelligence Report  |  " + datetime.now().strftime("%d %b %Y"), ln=True)
+            pdf.ln(2)
+            pdf.set_draw_color(88, 130, 200)
+            pdf.set_line_width(0.6)
+            pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+            pdf.ln(8)
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_text_color(40, 40, 40)
+            for para in paras:
+                pdf.multi_cell(0, 7, clean(para))
+                pdf.ln(4)
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(30, 60, 120)
+            pdf.set_fill_color(235, 243, 255)
+            pdf.multi_cell(0, 7, "Key Recommendation:", fill=True)
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_text_color(40, 40, 40)
+            pdf.multi_cell(0, 7, clean(rec), fill=True)
+            pdf.set_y(-20)
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.set_text_color(160, 160, 160)
+            pdf.cell(0, 8, "Generated by Retail Analytics Dashboard", align="C")
+            return bytes(pdf.output())
+
+        pdf_bytes = _build_pdf(paragraphs, recommendation, shop_name)
+        st.download_button(
+            "Download as PDF",
+            data=pdf_bytes,
+            file_name=shop_name.replace(" ","_") + "_report_" + datetime.now().strftime("%Y%m%d") + ".pdf",
+            mime="application/pdf",
+        )
+    else:
+        st.caption("Install fpdf2 to enable PDF download: pip install fpdf2")
