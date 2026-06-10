@@ -106,6 +106,47 @@ def make_sample():
     return pd.DataFrame(rows)
 
 
+# ── COLUMN MAPPING CONFIG ──
+REQUIRED_FIELDS = {
+    "DateTime":      "Transaction date & time (e.g. 2024-01-15 or 15/01/2024 10:30)",
+    "Product":       "Product or item name",
+    "Qty":           "Quantity / units sold per transaction",
+    "Selling_Price": "Selling price per unit",
+}
+OPTIONAL_FIELDS = {
+    "Category": "Product category or department (e.g. Clothing, Electronics)",
+    "Customer": "Customer ID or name",
+    "Payment":  "Payment method (UPI, Cash, Card, etc.)",
+}
+ALL_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
+
+
+def _guess_cols(file_cols):
+    """Auto-suggest a column for each standard field based on name similarity."""
+    lc = {c.lower().strip(): c for c in file_cols}
+    hints = {
+        "DateTime":      ["datetime","date","timestamp","time","order_time","created_at",
+                          "order_date","sale_date","transaction_date","bill_date","txn_date"],
+        "Product":       ["product","item","name","product_name","item_name","description",
+                          "product_description","item_desc","sku","prod"],
+        "Qty":           ["qty","quantity","units","count","pieces","pcs","no_of_units","num_units","sold_qty"],
+        "Selling_Price": ["selling_price","price","sp","sale_price","unit_price","rate",
+                          "sell_price","sold_price","amount","net_price"],
+        "Category":      ["category","cat","type","product_type","segment","dept","department","section","group"],
+        "Customer":      ["customer","cust","customer_id","customer_name","buyer","client",
+                          "cust_name","cust_id","mobile","phone","contact"],
+        "Payment":       ["payment","payment_method","mode","pay_mode","payment_mode","tender",
+                          "pay_type","transaction_mode"],
+    }
+    guesses = {}
+    for field, keywords in hints.items():
+        for kw in keywords:
+            if kw in lc:
+                guesses[field] = lc[kw]
+                break
+    return guesses
+
+
 # ── SIDEBAR ──
 with st.sidebar:
     st.markdown("## Retail Analytics")
@@ -113,8 +154,14 @@ with st.sidebar:
     shop_name = st.text_input("Shop / Mall Name", value="Sharma Retail Store")
     st.markdown("---")
     st.markdown("**Upload Your Sales Data**")
-    st.caption("CSV: DateTime, Product, Category, Qty, Selling_Price, Customer, Payment")
+    st.caption("CSV or Excel with your sales records")
     uploaded = st.file_uploader("", type=["csv","xlsx"])
+    if uploaded:
+        _mkey = "col_mapping_" + uploaded.name
+        if _mkey in st.session_state:
+            if st.button("🔄 Re-map Columns", use_container_width=True):
+                del st.session_state[_mkey]
+                st.rerun()
     st.markdown("---")
     period = st.radio("View Period", ["Last 7 Days","Last 30 Days","Last 90 Days","Full Year"])
     days = {"Last 7 Days":7,"Last 30 Days":30,"Last 90 Days":90,"Full Year":365}[period]
@@ -127,27 +174,101 @@ with st.sidebar:
 # ── LOAD DATA ──
 if uploaded:
     try:
-        df_raw = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
-        for col in df_raw.columns:
-            if col.lower() in ["datetime","date","timestamp","time","order_time","created_at"]:
-                df_raw["DateTime"] = pd.to_datetime(df_raw[col])
-                df_raw["Date"] = df_raw["DateTime"].dt.date
-                df_raw["Hour"] = df_raw["DateTime"].dt.hour
-                df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
-                df_raw["DayNum"] = df_raw["DateTime"].dt.dayofweek
-                break
-        if "Revenue" not in df_raw.columns:
-            price_col = next((c for c in ["Selling_Price","Price","MRP"] if c in df_raw.columns), None)
-            if price_col and "Qty" in df_raw.columns:
-                df_raw["Revenue"] = df_raw["Qty"] * df_raw[price_col]
-        using_real = True
+        df_raw_upload = (pd.read_csv(uploaded) if uploaded.name.endswith(".csv")
+                         else pd.read_excel(uploaded))
     except Exception as e:
-        st.error("Error loading file: " + str(e))
-        df_raw = make_sample()
-        using_real = False
+        st.error("Could not read file: " + str(e))
+        st.stop()
+
+    file_cols = list(df_raw_upload.columns)
+    mapping_key = "col_mapping_" + uploaded.name
+
+    if mapping_key not in st.session_state:
+        # ── COLUMN MAPPING FORM ──
+        st.markdown("## Map Your Data Columns")
+        st.caption(
+            "Your file has **" + str(len(file_cols)) + " column" +
+            ("s" if len(file_cols) != 1 else "") + "**: `" +
+            "`, `".join(file_cols) + "`  \n"
+            "Match each field below to the right column. "
+            "Required fields are marked **✱**."
+        )
+        st.markdown("")
+
+        guesses = _guess_cols(file_cols)
+        sel = {}
+
+        with st.form("col_mapping_form"):
+            col_a, col_b = st.columns(2)
+            field_items = list(ALL_FIELDS.items())
+
+            for i, (field, desc) in enumerate(field_items):
+                is_optional = field in OPTIONAL_FIELDS
+                null_option = "Not available" if is_optional else "— select —"
+                options = [null_option] + file_cols
+                default_val = guesses.get(field, null_option)
+                default_idx = options.index(default_val) if default_val in options else 0
+                target_col = col_a if i % 2 == 0 else col_b
+                with target_col:
+                    label = field + ("  *(optional)*" if is_optional else "  ✱")
+                    sel[field] = st.selectbox(
+                        label,
+                        options=options,
+                        index=default_idx,
+                        help=desc,
+                    )
+
+            st.markdown("")
+            submitted = st.form_submit_button(
+                "✅  Apply Mapping & Run Dashboard",
+                use_container_width=True,
+            )
+
+        if submitted:
+            missing = [f for f in REQUIRED_FIELDS if sel.get(f) == "— select —"]
+            if missing:
+                st.error("Please map all required fields: **" + ", ".join(missing) + "**")
+            else:
+                st.session_state[mapping_key] = {f: sel[f] for f in ALL_FIELDS}
+                st.rerun()
+
+        st.stop()
+
+    # ── APPLY STORED MAPPING ──
+    mapping = st.session_state[mapping_key]
+    rename_dict = {
+        mapping[f]: f
+        for f in ALL_FIELDS
+        if mapping.get(f) not in ("Not available", "— select —", None, "")
+        and mapping[f] in df_raw_upload.columns
+        and mapping[f] != f  # skip if column already has the standard name
+    }
+    df_raw = df_raw_upload.rename(columns=rename_dict)
+
+    # Parse DateTime into derived columns
+    if "DateTime" in df_raw.columns:
+        df_raw["DateTime"] = pd.to_datetime(df_raw["DateTime"], errors="coerce")
+        df_raw["Date"]      = df_raw["DateTime"].dt.date
+        df_raw["Hour"]      = df_raw["DateTime"].dt.hour
+        df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
+        df_raw["DayNum"]    = df_raw["DateTime"].dt.dayofweek
+
+    # Compute Revenue if not already present
+    if "Revenue" not in df_raw.columns:
+        if "Selling_Price" in df_raw.columns and "Qty" in df_raw.columns:
+            df_raw["Revenue"] = (
+                pd.to_numeric(df_raw["Selling_Price"], errors="coerce") *
+                pd.to_numeric(df_raw["Qty"], errors="coerce")
+            )
+        elif "Selling_Price" in df_raw.columns:
+            df_raw["Revenue"] = pd.to_numeric(df_raw["Selling_Price"], errors="coerce")
+
+    using_real = True
+
 else:
     df_raw = make_sample()
     using_real = False
+
 
 max_date = df_raw["Date"].max()
 cutoff = max_date - timedelta(days=days)
@@ -212,7 +333,8 @@ def build_summary(hinglish=False):
         lines.append("Your best-selling item was <b>" + top_product + "</b>.")
         if bh is not None:
             lines.append("You were busiest between <b>" + peak_str + "</b> — keep extra staff ready during that time.")
-        lines.append("Compared to the previous period, revenue is <b>" + trend_word_en + " " + delta_str + "</b>.")
+        if prev_rev > 0:
+            lines.append("Compared to the previous period, revenue is <b>" + trend_word_en + " " + delta_str + "</b>.")
         if rev_delta < -15:
             lines.append("<span style='color:#f85149'>Revenue has dropped significantly — check if any products stopped selling or if footfall reduced.</span>")
         elif rev_delta > 15:
@@ -225,7 +347,8 @@ def build_summary(hinglish=False):
         lines.append("Sabse zyada bikne wala item tha <b>" + top_product + "</b>.")
         if bh is not None:
             lines.append("<b>" + peak_str + "</b> ke beech sabse zyada bheed thi — us waqt extra staff rakhein.")
-        lines.append("Pichle period se compare karein toh revenue <b>" + delta_str + " " + trend_word_hi + "</b> hai.")
+        if prev_rev > 0:
+            lines.append("Pichle period se compare karein toh revenue <b>" + delta_str + " " + trend_word_hi + "</b> hai.")
         if rev_delta < -15:
             lines.append("<span style='color:#f85149'>Revenue bahut gir gayi hai — dekhein kaunsa item bikna band ho gaya ya kam log aa rahe hain.</span>")
         elif rev_delta > 15:
@@ -249,38 +372,39 @@ st.markdown("#### Alerts & Warnings")
 
 alerts = []
 
-# Alert 1: Smart slow-mover — compare each product's last-7-day velocity to its own 30-day average
 if len(df_raw) > 0 and "Product" in df_raw.columns:
-    ref_cutoff_30 = max_date - timedelta(days=30)
-    ref_cutoff_7  = max_date - timedelta(days=7)
-    df_30 = df_raw[df_raw["Date"] >= ref_cutoff_30]
-    df_7  = df_raw[df_raw["Date"] >= ref_cutoff_7]
+    # Compare the most recent 7 days in the dataset against the 30 days BEFORE that window.
+    ref_cutoff_7   = max_date - timedelta(days=7)
+    ref_cutoff_p30 = max_date - timedelta(days=37)  # 30-day window ending where last-7 begins
 
-    vel_30 = df_30.groupby("Product")["Qty"].sum() / 30.0
+    df_7   = df_raw[df_raw["Date"] >= ref_cutoff_7]
+    df_p30 = df_raw[(df_raw["Date"] >= ref_cutoff_p30) & (df_raw["Date"] < ref_cutoff_7)]
+
+    # Alert 1: Smart slow-mover — last-7-day velocity vs prior-30-day velocity
+    vel_30 = df_p30.groupby("Product")["Qty"].sum() / 30.0
     vel_7  = df_7.groupby("Product")["Qty"].sum() / 7.0
 
     common = vel_30.index.intersection(vel_7.index)
     slow_products = []
     for prod in common:
-        avg_vel = vel_30[prod]
+        avg_vel    = vel_30[prod]
         recent_vel = vel_7[prod]
         if avg_vel > 0.1 and recent_vel < avg_vel * 0.5:
             drop_pct = int((1 - recent_vel / avg_vel) * 100)
             slow_products.append((prod, drop_pct))
     slow_products.sort(key=lambda x: -x[1])
     for prod, drop in slow_products[:3]:
-        msg = "<b>" + prod + "</b> — sales dropped <b>" + str(drop) + "%</b> this week vs its 30-day average."
+        msg = "<b>" + prod + "</b> — sales dropped <b>" + str(drop) + "%</b> this week vs the prior 30 days."
         if lang == "Hinglish":
-            msg = "<b>" + prod + "</b> ki bikri is hafte <b>" + str(drop) + "%</b> giri hai — dhyan dein."
+            msg = "<b>" + prod + "</b> ki bikri is hafte <b>" + str(drop) + "%</b> giri hai pichle 30 din ke comparison mein."
         alerts.append(("red", msg))
 
-# Alert 2: Products that have not sold at all in last 7 days but sold before
-if len(df_raw) > 0:
-    all_prods = set(df_raw["Product"].unique())
+    # Alert 2: Products that have not sold at all in the last 7 days but sold before
+    all_prods    = set(df_raw["Product"].unique())
     recent_prods = set(df_7["Product"].unique()) if len(df_7) > 0 else set()
-    dead_prods = all_prods - recent_prods
+    dead_prods   = all_prods - recent_prods
     if dead_prods:
-        dead_list = ", ".join(list(dead_prods)[:3])
+        dead_list = ", ".join(sorted(dead_prods)[:3])
         msg = "No sales in last 7 days: <b>" + dead_list + "</b>. Consider discounting or removing from shelf."
         if lang == "Hinglish":
             msg = "Yeh items pichhle 7 din mein bilkul nahi bike: <b>" + dead_list + "</b>. Discount dein ya shelf se hatayein."
@@ -333,9 +457,16 @@ st.markdown("---")
 # ── KPI METRICS ──
 m1,m2,m3,m4,m5,m6 = st.columns(6)
 with m1:
-    st.metric("Total Revenue", "Rs {:,}".format(int(total_rev)), delta=("+" if rev_delta>=0 else "")+str(round(rev_delta,1))+"% vs prev")
+    # Only show delta badge when there is a prior period to compare against
+    rev_delta_label = (
+        ("+" if rev_delta >= 0 else "") + str(round(rev_delta, 1)) + "% vs prev"
+    ) if prev_rev > 0 else None
+    st.metric("Total Revenue", "Rs {:,}".format(int(total_rev)), delta=rev_delta_label)
 with m2:
-    st.metric("Transactions", "{:,}".format(total_orders), delta=("+" if ord_delta>=0 else "")+str(round(ord_delta,1))+"% vs prev")
+    ord_delta_label = (
+        ("+" if ord_delta >= 0 else "") + str(round(ord_delta, 1)) + "% vs prev"
+    ) if prev_orders > 0 else None
+    st.metric("Transactions", "{:,}".format(total_orders), delta=ord_delta_label)
 with m3:
     st.metric("Avg Bill Value", "Rs {:,}".format(int(avg_order)))
 with m4:
@@ -428,10 +559,7 @@ if "Hour" in df.columns and "DayOfWeek" in df.columns and len(df) > 0:
             day = str(row["DayOfWeek"])[:3]
             hour_label = fh2(int(row["Hour"]))
             txn = int(row["Transactions"])
-            if lang == "English":
-                sub = str(txn) + " avg bills"
-            else:
-                sub = str(txn) + " bills average"
+            sub = str(txn) + (" avg bills" if lang == "English" else " bills average")
             st.markdown(
                 "<div class='insight-box' style='text-align:center'>"
                 "<div class='insight-title'>Keep Extra Staff</div>"
@@ -459,10 +587,7 @@ if "Qty" in df.columns and len(df) > 0:
 
     col_fast, col_slow2 = st.columns(2)
     with col_fast:
-        if lang == "English":
-            st.markdown("**Order More (Fast Movers)**")
-        else:
-            st.markdown("**Yeh Order Karein (Jaldi Bikne Wale)**")
+        st.markdown("**Order More (Fast Movers)**" if lang == "English" else "**Yeh Order Karein (Jaldi Bikne Wale)**")
         for prod, v in top_fast.items():
             daily_units = round(v, 1)
             weekly_need = int(v * 7)
@@ -476,10 +601,7 @@ if "Qty" in df.columns and len(df) > 0:
             )
 
     with col_slow2:
-        if lang == "English":
-            st.markdown("**Review Stock (Slow Movers)**")
-        else:
-            st.markdown("**Stock Ghatayen (Dheere Bikne Wale)**")
+        st.markdown("**Review Stock (Slow Movers)**" if lang == "English" else "**Stock Ghatayen (Dheere Bikne Wale)**")
         for prod, v in bottom_slow.items():
             daily_units = round(v, 2)
             st.markdown(
@@ -540,7 +662,6 @@ if len(df_raw) > 0:
     monthly["Month"] = monthly["Month"].astype(str)
     monthly = monthly.sort_values("Month")
 
-    # Color-code revenue column
     max_rev = monthly["Revenue"].max()
     min_rev = monthly["Revenue"].min()
 
@@ -553,7 +674,6 @@ if len(df_raw) > 0:
         bills = int(row["Bills"])
         month_str = str(row["Month"])
 
-        # vs prev month
         if prev_rev_m is not None and prev_rev_m > 0:
             chg = (rev - prev_rev_m) / prev_rev_m * 100
             chg_str = ("+" if chg >= 0 else "") + str(round(chg,1)) + "%"
@@ -562,7 +682,6 @@ if len(df_raw) > 0:
         else:
             vs_cell = "<span style='color:#8b949e'>—</span>"
 
-        # Revenue bar colour based on value
         intensity = int((rev - min_rev) / max(max_rev - min_rev, 1) * 200)
         bg = "rgba(88," + str(100 + intensity) + ",255,0.08)"
 
@@ -583,17 +702,38 @@ if len(df_raw) > 0:
     )
     st.caption("Darker blue = higher revenue month")
 
+
 # ── WEEKLY BAR ──
 st.markdown("---")
 st.markdown("#### Weekly Revenue (last 12 weeks)")
+
+def _fmt_week(p_str):
+    """Convert '2024-10-14/2024-10-20' → 'Oct 14–20' (or 'Oct 28–Nov 3' for month boundaries)."""
+    parts = p_str.split("/")
+    sd = pd.to_datetime(parts[0])
+    ed = pd.to_datetime(parts[1])
+    if sd.month == ed.month:
+        return sd.strftime("%b ") + str(sd.day) + "–" + str(ed.day)
+    return sd.strftime("%b ") + str(sd.day) + "–" + ed.strftime("%b ") + str(ed.day)
+
 dw2 = df_raw.copy()
 dw2["Date"] = pd.to_datetime(dw2["Date"])
-dw2["Week"] = dw2["Date"].dt.to_period("W").astype(str)
-wk = dw2.groupby("Week")["Revenue"].sum().reset_index().tail(12)
-fig5 = px.bar(wk, x="Week", y="Revenue", color_discrete_sequence=["#d2a8ff"], labels={"Revenue":"Rs","Week":""})
+dw2["_period"] = dw2["Date"].dt.to_period("W").astype(str)
+dw2["Week"]    = dw2["_period"].apply(_fmt_week)
+
+wk = dw2.groupby(["_period","Week"])["Revenue"].sum().reset_index()
+wk = wk.sort_values("_period").tail(12)
+
+fig5 = px.bar(
+    wk, x="Week", y="Revenue",
+    color_discrete_sequence=["#d2a8ff"],
+    labels={"Revenue":"Rs","Week":""},
+    category_orders={"Week": wk["Week"].tolist()},
+)
 fig5.update_layout(**DARK, height=220)
 fig5.update_traces(marker_line_width=0)
 st.plotly_chart(fig5, use_container_width=True)
+
 
 # ── EXPORT ──
 st.markdown("---")
