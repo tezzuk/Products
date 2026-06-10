@@ -1,5 +1,5 @@
 """
-Business Intelligence Dashboard — Demo App
+Business Intelligence Dashboard -- Demo App
 Dark theme, time/date analytics, rich insights.
 """
 
@@ -12,15 +12,11 @@ import random
 
 st.set_page_config(page_title="Business Dashboard", page_icon="📊", layout="wide")
 
-# ── DARK THEME CSS ──
 st.markdown("""
 <style>
-/* Dark background */
 .stApp { background-color: #0d1117; color: #e6edf3; }
 [data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; }
 [data-testid="stSidebar"] * { color: #e6edf3 !important; }
-
-/* Metric cards */
 [data-testid="metric-container"] {
     background: #161b22;
     border: 1px solid #30363d;
@@ -29,22 +25,10 @@ st.markdown("""
 }
 [data-testid="stMetricValue"] { color: #58a6ff !important; font-size: 28px !important; font-weight: 700 !important; }
 [data-testid="stMetricLabel"] { color: #8b949e !important; }
-[data-testid="stMetricDelta"] svg { display: none; }
-[data-testid="stMetricDelta"] { color: #3fb950 !important; }
-
-/* Section headers */
 h1, h2, h3, h4 { color: #e6edf3 !important; }
-
-/* Dataframes */
 [data-testid="stDataFrame"] { border: 1px solid #30363d; border-radius: 8px; }
-
-/* Divider */
 hr { border-color: #30363d !important; }
-
-/* Expander */
 [data-testid="stExpander"] { background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
-
-/* Insight cards */
 .insight-box {
     background: #161b22;
     border: 1px solid #30363d;
@@ -71,7 +55,7 @@ DARK_PLOT = dict(
 
 COLORS = ["#58a6ff", "#3fb950", "#d2a8ff", "#ffa657", "#f85149", "#79c0ff", "#56d364", "#ff7b72"]
 
-# ── SAMPLE DATA ──
+
 @st.cache_data
 def generate_sample_data(business_type="Restaurant"):
     random.seed(42)
@@ -99,7 +83,7 @@ def generate_sample_data(business_type="Restaurant"):
         peak_hours = [10, 11, 14, 15, 16, 17]
 
     records = []
-    customers = [f"Customer {chr(65+i)}" for i in range(20)]
+    customers = ["Customer " + chr(65 + i) for i in range(20)]
     all_hours = list(range(8, 22))
     hour_weights = [5 if h in peak_hours else 1 for h in all_hours]
 
@@ -118,7 +102,7 @@ def generate_sample_data(business_type="Restaurant"):
                 "Date": d,
                 "Hour": hour,
                 "DayOfWeek": dt.strftime("%A"),
-                "DayNum": dt.weekday(),  # datetime.weekday() is fine here (it's a method on datetime objects)
+                "DayNum": dt.weekday(),
                 "Product": products[idx],
                 "Qty": qty,
                 "Price": prices[idx],
@@ -129,9 +113,9 @@ def generate_sample_data(business_type="Restaurant"):
     return pd.DataFrame(records)
 
 
-# ── SIDEBAR ──
+# SIDEBAR
 with st.sidebar:
-    st.markdown("## 📊 BI Dashboard")
+    st.markdown("## Business Dashboard")
     st.markdown("---")
     biz_name = st.text_input("Business Name", value="Sharma Enterprises")
     biz_type = st.selectbox("Business Type",
@@ -145,10 +129,10 @@ with st.sidebar:
     days_map = {"Last 7 Days": 7, "Last 30 Days": 30, "Last 90 Days": 90}
     days = days_map[period]
     st.markdown("---")
-    st.caption("💡 *Demo mode — sample data. Upload your real CSV to see your numbers.*")
+    st.caption("Demo mode — sample data. Upload your real CSV to see your numbers.")
 
 
-# ── LOAD DATA ──
+# LOAD DATA
 if uploaded:
     try:
         if uploaded.name.endswith(".csv"):
@@ -156,7 +140,6 @@ if uploaded:
         else:
             df_raw = pd.read_excel(uploaded)
 
-        # Auto-detect datetime column
         for col in df_raw.columns:
             if col.lower() in ["datetime", "date", "timestamp", "time", "order_time", "created_at"]:
                 df_raw["DateTime"] = pd.to_datetime(df_raw[col])
@@ -165,11 +148,12 @@ if uploaded:
                 df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
                 df_raw["DayNum"] = df_raw["DateTime"].dt.dayofweek
                 break
+
         if "Revenue" not in df_raw.columns and "Qty" in df_raw.columns and "Price" in df_raw.columns:
             df_raw["Revenue"] = df_raw["Qty"] * df_raw["Price"]
         using_real = True
     except Exception as e:
-        st.error(f"Error reading file: {e}")
+        st.error("Error reading file: " + str(e))
         df_raw = generate_sample_data(biz_type)
         using_real = False
 else:
@@ -182,18 +166,20 @@ df = df_raw[df_raw["Date"] >= cutoff].copy()
 df_prev = df_raw[(df_raw["Date"] >= prev_cutoff) & (df_raw["Date"] < cutoff)].copy()
 
 
-# ── HEADER ──
+# HEADER
 c1, c2 = st.columns([4, 1])
 with c1:
-    st.markdown(f"# 📊 {biz_name}")
-    st.caption(f"{'📂 Your real data' if using_real else '📋 Demo — sample data'} · {period} · Last updated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
+    st.markdown("# " + biz_name)
+    data_label = "Your real data" if using_real else "Demo - sample data"
+    now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    st.caption(data_label + " | " + period + " | Last updated: " + now_str)
 with c2:
     if not using_real:
         st.info("Demo Mode")
 
 st.markdown("---")
 
-# ── KPIs ──
+# KPIs
 total_rev = df["Revenue"].sum()
 prev_rev = df_prev["Revenue"].sum()
 rev_delta = ((total_rev - prev_rev) / prev_rev * 100) if prev_rev > 0 else 0
@@ -205,47 +191,41 @@ ord_delta = ((total_orders - prev_orders) / prev_orders * 100) if prev_orders > 
 avg_order = df["Revenue"].mean() if len(df) > 0 else 0
 unique_customers = df["Customer"].nunique() if "Customer" in df.columns else 0
 
-# Best hour
 if "Hour" in df.columns and len(df) > 0:
-    best_hour_row = df.groupby("Hour")["Revenue"].sum().idxmax()
-    best_hour_str = f"{best_hour_row:02d}:00–{best_hour_row+1:02d}:00"
+    best_hour_val = int(df.groupby("Hour")["Revenue"].sum().idxmax())
+    best_hour_str = str(best_hour_val).zfill(2) + ":00-" + str(best_hour_val + 1).zfill(2) + ":00"
 else:
     best_hour_str = "N/A"
 
-# Best day of week
 if "DayOfWeek" in df.columns and len(df) > 0:
-    best_dow = df.groupby("DayOfWeek")["Revenue"].sum().idxmax()
+    best_dow = str(df.groupby("DayOfWeek")["Revenue"].sum().idxmax())
 else:
     best_dow = "N/A"
 
-def arrow(v):
-    sign = "▲" if v >= 0 else "▼"
-    color = "green" if v >= 0 else "red"
-    return f"<span class='badge-{'green' if v>=0 else 'red'}'>{sign} {abs(v):.1f}%</span>"
-
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 with m1:
-    st.metric("💰 Revenue", f"₹{total_rev:,.0f}", delta=f"{'▲' if rev_delta>=0 else '▼'} {abs(rev_delta):.1f}% vs prev")
+    d_str = ("+" if rev_delta >= 0 else "") + str(round(rev_delta, 1)) + "% vs prev"
+    st.metric("Revenue", "Rs " + str(int(total_rev)), delta=d_str)
 with m2:
-    st.metric("🧾 Orders", f"{total_orders:,}", delta=f"{'▲' if ord_delta>=0 else '▼'} {abs(ord_delta):.1f}% vs prev")
+    o_str = ("+" if ord_delta >= 0 else "") + str(round(ord_delta, 1)) + "% vs prev"
+    st.metric("Orders", str(total_orders), delta=o_str)
 with m3:
-    st.metric("📦 Avg Order", f"₹{avg_order:,.0f}")
+    st.metric("Avg Order", "Rs " + str(int(avg_order)))
 with m4:
-    st.metric("👥 Customers", f"{unique_customers}")
+    st.metric("Customers", str(unique_customers))
 with m5:
-    st.metric("⏰ Peak Hour", best_hour_str)
+    st.metric("Peak Hour", best_hour_str)
 with m6:
-    st.metric("📅 Best Day", best_dow)
+    st.metric("Best Day", best_dow)
 
 st.markdown("---")
 
-# ── ROW 1: Revenue Trend + Product Donut ──
+# ROW 1: Revenue Trend + Product Donut
 col_trend, col_pie = st.columns([3, 2])
 
 with col_trend:
-    st.markdown("#### 📈 Revenue Trend")
+    st.markdown("#### Daily Revenue Trend")
     daily = df.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
-    # 7-day moving average
     daily["MA7"] = daily["Revenue"].rolling(7, min_periods=1).mean()
 
     fig = go.Figure()
@@ -267,46 +247,53 @@ with col_trend:
     st.plotly_chart(fig, use_container_width=True)
 
 with col_pie:
-    st.markdown("#### 🏆 Top Products")
+    st.markdown("#### Top Products")
     prod_rev = df.groupby("Product")["Revenue"].sum().nlargest(6).reset_index()
     fig2 = px.pie(prod_rev, values="Revenue", names="Product",
                   color_discrete_sequence=COLORS, hole=0.45)
-    fig2.update_layout(**{k: v for k, v in DARK_PLOT.items() if k not in ["xaxis", "yaxis"]},
-                       height=280, showlegend=True,
+    dark_no_axes = {k: v for k, v in DARK_PLOT.items() if k not in ["xaxis", "yaxis"]}
+    fig2.update_layout(**dark_no_axes, height=280, showlegend=True,
                        legend=dict(font=dict(color="#8b949e", size=11)))
     fig2.update_traces(textposition="inside", textinfo="percent",
                        textfont=dict(color="white"))
     st.plotly_chart(fig2, use_container_width=True)
 
 
-# ── ROW 2: Hourly Heatmap + Day of Week ──
+# ROW 2: Hourly + Day of Week
 st.markdown("---")
 col_hour, col_dow = st.columns(2)
 
 with col_hour:
-    st.markdown("#### ⏰ Revenue by Hour of Day")
+    st.markdown("#### Revenue by Hour of Day")
     if "Hour" in df.columns:
         hourly = df.groupby("Hour")["Revenue"].sum().reset_index()
-        hourly["Label"] = hourly["Hour"].apply(
-            lambda h: f"{'12' if h==12 else h%12 if h%12!=0 else 12}{'am' if h<12 else 'pm'}"
-        )
+        def fmt_hour(h):
+            if h == 0:
+                return "12am"
+            elif h < 12:
+                return str(h) + "am"
+            elif h == 12:
+                return "12pm"
+            else:
+                return str(h - 12) + "pm"
+        hourly["Label"] = hourly["Hour"].apply(fmt_hour)
         fig3 = px.bar(hourly, x="Label", y="Revenue",
                       color="Revenue", color_continuous_scale=["#21262d", "#58a6ff"],
-                      labels={"Revenue": "₹", "Label": "Hour"})
+                      labels={"Revenue": "Rs", "Label": "Hour"})
         fig3.update_layout(**DARK_PLOT, height=250, coloraxis_showscale=False)
         fig3.update_traces(marker_line_width=0)
         st.plotly_chart(fig3, use_container_width=True)
     else:
-        st.info("No time data — add a DateTime column to your CSV.")
+        st.info("No time data. Add a DateTime column to your CSV.")
 
 with col_dow:
-    st.markdown("#### 📅 Revenue by Day of Week")
+    st.markdown("#### Revenue by Day of Week")
     if "DayOfWeek" in df.columns:
         day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         dow = df.groupby("DayOfWeek")["Revenue"].sum().reindex(day_order).reset_index()
         fig4 = px.bar(dow, x="DayOfWeek", y="Revenue",
                       color="Revenue", color_continuous_scale=["#21262d", "#3fb950"],
-                      labels={"Revenue": "₹", "DayOfWeek": ""})
+                      labels={"Revenue": "Rs", "DayOfWeek": ""})
         fig4.update_layout(**DARK_PLOT, height=250, coloraxis_showscale=False)
         fig4.update_traces(marker_line_width=0)
         st.plotly_chart(fig4, use_container_width=True)
@@ -314,94 +301,112 @@ with col_dow:
         st.info("No day data available.")
 
 
-# ── ROW 3: Product table + Customer table ──
+# ROW 3: Product + Customer tables
 st.markdown("---")
 col_prod, col_cust = st.columns(2)
 
 with col_prod:
-    st.markdown("#### 📦 Product Performance")
+    st.markdown("#### Product Performance")
     prod_summary = df.groupby("Product").agg(
         Units_Sold=("Qty", "sum"),
         Revenue=("Revenue", "sum"),
         Orders=("Product", "count")
     ).sort_values("Revenue", ascending=False).reset_index()
-    prod_summary["Revenue"] = prod_summary["Revenue"].apply(lambda x: f"₹{x:,.0f}")
+    prod_summary["Revenue"] = prod_summary["Revenue"].apply(lambda x: "Rs " + str(int(x)))
     st.dataframe(prod_summary, use_container_width=True, hide_index=True, height=230)
 
 with col_cust:
-    st.markdown("#### 👥 Top Customers")
+    st.markdown("#### Top Customers")
     if "Customer" in df.columns:
         cust_summary = df.groupby("Customer").agg(
             Orders=("Customer", "count"),
             Total_Spent=("Revenue", "sum")
         ).sort_values("Total_Spent", ascending=False).head(10).reset_index()
-        cust_summary["Total_Spent"] = cust_summary["Total_Spent"].apply(lambda x: f"₹{x:,.0f}")
+        cust_summary["Total_Spent"] = cust_summary["Total_Spent"].apply(lambda x: "Rs " + str(int(x)))
         st.dataframe(cust_summary, use_container_width=True, hide_index=True, height=230)
     else:
-        st.info("Add a 'Customer' column to see customer analytics.")
+        st.info("Add a Customer column to your CSV to see customer analytics.")
 
 
-# ── ROW 4: Weekly Revenue Comparison ──
+# ROW 4: Weekly comparison
 st.markdown("---")
-st.markdown("#### 📊 Weekly Revenue Comparison (last 8 weeks)")
+st.markdown("#### Weekly Revenue Comparison (last 8 weeks)")
 
 if len(df_raw) > 0:
-    df_raw2 = df_raw.copy()
-    df_raw2["Date"] = pd.to_datetime(df_raw2["Date"])
-    df_raw2["Week"] = df_raw2["Date"].dt.to_period("W").astype(str)
-    weekly = df_raw2.groupby("Week")["Revenue"].sum().reset_index().tail(8)
+    df_weekly = df_raw.copy()
+    df_weekly["Date"] = pd.to_datetime(df_weekly["Date"])
+    df_weekly["Week"] = df_weekly["Date"].dt.to_period("W").astype(str)
+    weekly = df_weekly.groupby("Week")["Revenue"].sum().reset_index().tail(8)
     fig5 = px.bar(weekly, x="Week", y="Revenue",
                   color_discrete_sequence=["#d2a8ff"],
-                  labels={"Revenue": "₹", "Week": ""})
+                  labels={"Revenue": "Rs", "Week": ""})
     fig5.update_layout(**DARK_PLOT, height=220)
     fig5.update_traces(marker_line_width=0)
     st.plotly_chart(fig5, use_container_width=True)
 
 
-# ── SMART INSIGHTS ──
+# SMART INSIGHTS
 st.markdown("---")
-st.markdown("#### 🔍 Smart Insights")
+st.markdown("#### Smart Insights")
 
 if len(df) > 0 and len(daily) > 0:
     best_day = daily.loc[daily["Revenue"].idxmax()]
     worst_day = daily.loc[daily["Revenue"].idxmin()]
-    best_prod = prod_rev.iloc[0]["Product"] if len(prod_rev) > 0 else "N/A"
+    best_prod = str(prod_rev.iloc[0]["Product"]) if len(prod_rev) > 0 else "N/A"
 
     i1, i2, i3, i4 = st.columns(4)
     with i1:
-        st.markdown(f"""<div class='insight-box'>
-            <div class='insight-title'>📈 Best Day</div>
-            <div class='insight-val'>{best_day['Date']}</div>
-            <div class='insight-sub'>₹{best_day['Revenue']:,.0f} revenue</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='insight-box'>"
+            "<div class='insight-title'>Best Day</div>"
+            "<div class='insight-val'>" + str(best_day["Date"]) + "</div>"
+            "<div class='insight-sub'>Rs " + str(int(best_day["Revenue"])) + " revenue</div>"
+            "</div>",
+            unsafe_allow_html=True
+        )
     with i2:
-        st.markdown(f"""<div class='insight-box'>
-            <div class='insight-title'>🏆 Top Product</div>
-            <div class='insight-val'>{best_prod}</div>
-            <div class='insight-sub'>Highest revenue item</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='insight-box'>"
+            "<div class='insight-title'>Top Product</div>"
+            "<div class='insight-val'>" + best_prod + "</div>"
+            "<div class='insight-sub'>Highest revenue item</div>"
+            "</div>",
+            unsafe_allow_html=True
+        )
     with i3:
-        st.markdown(f"""<div class='insight-box'>
-            <div class='insight-title'>⏰ Peak Hour</div>
-            <div class='insight-val'>{best_hour_str}</div>
-            <div class='insight-sub'>Most orders this period</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='insight-box'>"
+            "<div class='insight-title'>Peak Hour</div>"
+            "<div class='insight-val'>" + best_hour_str + "</div>"
+            "<div class='insight-sub'>Most orders this period</div>"
+            "</div>",
+            unsafe_allow_html=True
+        )
     with i4:
-        delta_color = "insight-val" if rev_delta >= 0 else "insight-val"
-        badge = f"<span class='badge-green'>▲ {rev_delta:.1f}%</span>" if rev_delta >= 0 else f"<span class='badge-red'>▼ {abs(rev_delta):.1f}%</span>"
-        st.markdown(f"""<div class='insight-box'>
-            <div class='insight-title'>📊 Revenue Trend</div>
-            <div class='insight-val'>{badge}</div>
-            <div class='insight-sub'>vs previous {days}-day period</div>
-        </div>""", unsafe_allow_html=True)
+        if rev_delta >= 0:
+            badge = "<span class='badge-green'>+" + str(round(rev_delta, 1)) + "%</span>"
+        else:
+            badge = "<span class='badge-red'>" + str(round(rev_delta, 1)) + "%</span>"
+        st.markdown(
+            "<div class='insight-box'>"
+            "<div class='insight-title'>Revenue Trend</div>"
+            "<div class='insight-val'>" + badge + "</div>"
+            "<div class='insight-sub'>vs previous " + str(days) + "-day period</div>"
+            "</div>",
+            unsafe_allow_html=True
+        )
 
 
-# ── EXPORT ──
+# EXPORT
 st.markdown("---")
 _, col_dl = st.columns([3, 1])
 with col_dl:
     csv_data = df.to_csv(index=False)
-    safe_name = biz_name.replace(' ', '_')
+    safe_name = biz_name.replace(" ", "_")
+    today_str = str(date.today())
     st.download_button(
-        "⬇️ Export Filtered Data",
-        d
+        "Export Data as CSV",
+        data=csv_data,
+        file_name=safe_name + "_" + today_str + ".csv",
+        mime="text/csv"
+    )
