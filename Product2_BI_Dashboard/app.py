@@ -160,7 +160,9 @@ else:
     df_raw = generate_sample_data(biz_type)
     using_real = False
 
-cutoff = date.today() - timedelta(days=days)
+# Use the data's own latest date (so uploaded historical data works correctly)
+max_date = df_raw["Date"].max()
+cutoff = max_date - timedelta(days=days)
 prev_cutoff = cutoff - timedelta(days=days)
 df = df_raw[df_raw["Date"] >= cutoff].copy()
 df_prev = df_raw[(df_raw["Date"] >= prev_cutoff) & (df_raw["Date"] < cutoff)].copy()
@@ -406,7 +408,4 @@ with col_dl:
     today_str = str(date.today())
     st.download_button(
         "Export Data as CSV",
-        data=csv_data,
-        file_name=safe_name + "_" + today_str + ".csv",
-        mime="text/csv"
-    )
+  
