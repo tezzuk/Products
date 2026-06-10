@@ -118,7 +118,7 @@ def generate_sample_data(business_type="Restaurant"):
                 "Date": d,
                 "Hour": hour,
                 "DayOfWeek": dt.strftime("%A"),
-                "DayNum": dt.weekday(),
+                "DayNum": dt.weekday(),  # datetime.weekday() is fine here (it's a method on datetime objects)
                 "Product": products[idx],
                 "Qty": qty,
                 "Price": prices[idx],
@@ -163,7 +163,7 @@ if uploaded:
                 df_raw["Date"] = df_raw["DateTime"].dt.date
                 df_raw["Hour"] = df_raw["DateTime"].dt.hour
                 df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
-                df_raw["DayNum"] = df_raw["DateTime"].dt.weekday()
+                df_raw["DayNum"] = df_raw["DateTime"].dt.dayofweek
                 break
         if "Revenue" not in df_raw.columns and "Qty" in df_raw.columns and "Price" in df_raw.columns:
             df_raw["Revenue"] = df_raw["Qty"] * df_raw["Price"]
@@ -404,6 +404,4 @@ with col_dl:
     st.download_button(
         "⬇️ Export Filtered Data",
         data=csv_data,
-        file_name=f"{biz_name.replace(' ', '_')}_{date.today()}.csv",
-        mime="text/csv"
-    )
+        file_name=f"{biz_name
