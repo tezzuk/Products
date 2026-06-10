@@ -401,7 +401,7 @@ st.markdown("---")
 _, col_dl = st.columns([3, 1])
 with col_dl:
     csv_data = df.to_csv(index=False)
+    safe_name = biz_name.replace(' ', '_')
     st.download_button(
         "⬇️ Export Filtered Data",
-        data=csv_data,
-        file_name=f"{biz_name
+        d
