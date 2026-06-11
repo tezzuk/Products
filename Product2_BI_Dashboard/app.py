@@ -1189,18 +1189,38 @@ st.caption("Generate a plain-English report a shop owner can read and act on imm
 
 
 def _build_report_text(df_r, df_raw_r, shop_r, days_r):
+    import numpy as _np
+    from sklearn.linear_model import LinearRegression as _LR
+
     parts = []
     rev   = df_r["Revenue"].sum() if "Revenue" in df_r.columns else 0
     bills = len(df_r)
     avg_b = rev / bills if bills > 0 else 0
 
+    # ── Para 1: Revenue overview + growth ──
+    growth_note = ""
+    if len(df_raw_r) > 0 and "Revenue" in df_raw_r.columns:
+        dr = df_raw_r.copy()
+        dr["Date"] = pd.to_datetime(dr["Date"])
+        dr = dr.sort_values("Date")
+        max_d = dr["Date"].max()
+        split = max_d - pd.Timedelta(days=days_r)
+        this_p = dr[dr["Date"] > split]["Revenue"].sum()
+        prev_p = dr[dr["Date"] <= split]["Revenue"].sum()
+        if prev_p > 0:
+            g = (this_p - prev_p) / prev_p * 100
+            direction = "up" if g >= 0 else "down"
+            growth_note = " Revenue is <b>{d} {p}%</b> compared to the equivalent previous period.".format(
+                d=direction, p=abs(round(g, 1))
+            )
     parts.append(
-        "{shop} generated a total revenue of Rs {rev:,} from {bills:,} transactions "
-        "over the last {days} days, with an average bill value of Rs {avg:,}.".format(
-            shop=shop_r, rev=int(rev), bills=bills, days=days_r, avg=int(avg_b)
+        "<b>{shop}</b> generated a total revenue of <b>Rs {rev:,}</b> from <b>{bills:,} transactions</b> "
+        "over the last {days} days, with an average bill value of <b>Rs {avg:,}</b>.{g}".format(
+            shop=shop_r, rev=int(rev), bills=bills, days=days_r, avg=int(avg_b), g=growth_note
         )
     )
 
+    # ── Para 2: Seasonal patterns ──
     if len(df_raw_r) > 0 and "Revenue" in df_raw_r.columns:
         dm2 = df_raw_r.copy()
         dm2["Date"] = pd.to_datetime(dm2["Date"])
@@ -1210,100 +1230,198 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
             bm = mon_rev.idxmax()
             wm = mon_rev.idxmin()
             mdiff = int((mon_rev[bm] - mon_rev[wm]) / mon_rev[wm] * 100)
+            dm2["MonthNum"] = dm2["Date"].dt.month
+            month_avg = dm2.groupby("MonthNum")["Revenue"].mean()
+            top_months = month_avg.nlargest(3).index.tolist()
+            month_names = {1:"January",2:"February",3:"March",4:"April",5:"May",6:"June",
+                          7:"July",8:"August",9:"September",10:"October",11:"November",12:"December"}
+            peak_season = ", ".join([month_names[m] for m in sorted(top_months)])
             parts.append(
-                "Looking at monthly performance across your full dataset, your best month was {bm} "
-                "and your weakest was {wm} -- a {d}% difference in revenue between the two.".format(
-                    bm=bm, wm=wm, d=mdiff
+                "Your best month on record was <b>{bm}</b> (Rs {brev:,}) and your weakest was <b>{wm}</b> -- "
+                "a <b>{d}% difference</b>. Historically your peak revenue months are <b>{ps}</b>. "
+                "Stock up and schedule extra staff before these months begin to avoid lost sales.".format(
+                    bm=bm, wm=wm, d=mdiff, ps=peak_season,
+                    brev=int(mon_rev[bm])
                 )
             )
 
+    # ── Para 3: Category + product breakdown ──
     top_prod_name = None
     if "Product" in df_r.columns and "Revenue" in df_r.columns and len(df_r) > 0:
         pr = df_r.groupby("Product")["Revenue"].sum().sort_values(ascending=False)
         if len(pr) >= 3:
             t, b = pr.head(3), pr.tail(3)
+            cat_note = ""
+            if "Category" in df_r.columns:
+                cat_rev = df_r.groupby("Category")["Revenue"].sum().sort_values(ascending=False)
+                top_cat = cat_rev.index[0]
+                top_cat_pct = int(cat_rev.iloc[0] / cat_rev.sum() * 100)
+                second_cat = cat_rev.index[1] if len(cat_rev) > 1 else None
+                second_cat_pct = int(cat_rev.iloc[1] / cat_rev.sum() * 100) if second_cat else 0
+                cat_note = " <b>{cat}</b> leads your categories at {pct}% of revenue, followed by <b>{c2}</b> at {p2}%.".format(
+                    cat=top_cat, pct=top_cat_pct, c2=second_cat, p2=second_cat_pct
+                )
             parts.append(
-                "Your top three revenue-generating products were {p1} (Rs {v1:,}), "
-                "{p2} (Rs {v2:,}), and {p3} (Rs {v3:,}). "
-                "Your three lowest revenue products were {b1}, {b2}, and {b3} -- "
-                "consider whether these need a price review, better placement, or a clearance discount.".format(
+                "Your top three products by revenue are <b>{p1}</b> (Rs {v1:,}), "
+                "<b>{p2}</b> (Rs {v2:,}), and <b>{p3}</b> (Rs {v3:,}).{cat} "
+                "Your slowest movers are <b>{b1}, {b2}, and {b3}</b> -- consider a clearance bundle "
+                "or positioning them next to a fast-seller to move stock.".format(
                     p1=t.index[0], v1=int(t.iloc[0]),
                     p2=t.index[1], v2=int(t.iloc[1]),
                     p3=t.index[2], v3=int(t.iloc[2]),
                     b1=b.index[-1], b2=b.index[-2], b3=b.index[-3],
+                    cat=cat_note
                 )
             )
         top_prod_name = pr.index[0] if len(pr) > 0 else None
 
-    day_part = hour_part = ""
-    if "DayOfWeek" in df_r.columns and len(df_r) > 0:
-        day_part = "Your busiest day of the week is {d}".format(
-            d=df_r.groupby("DayOfWeek")["Revenue"].sum().idxmax()
-        )
-    if "Hour" in df_r.columns and len(df_r) > 0:
-        ph = int(df_r.groupby("Hour")["Revenue"].sum().idxmax())
-        hour_part = "your peak selling window is {h}:00 to {h1}:00".format(h=ph, h1=ph+1)
-    if day_part and hour_part:
-        parts.append(day_part + " and " + hour_part +
-                     ". Make sure you have adequate staff and stock available during these times.")
-    elif day_part:
-        parts.append(day_part + ". Plan your staffing schedule accordingly.")
-
-    pay_col_r = next((c for c in ["Payment","Payment_Method","payment"] if c in df_r.columns), None)
-    if pay_col_r and len(df_r) > 0 and "Revenue" in df_r.columns:
-        pay_rev = df_r.groupby(pay_col_r)["Revenue"].sum()
-        top_pay = pay_rev.idxmax()
-        pay_pct = int(pay_rev[top_pay] / pay_rev.sum() * 100)
+    # ── Para 4: Day + hour traffic ──
+    if "DayOfWeek" in df_r.columns and "Hour" in df_r.columns and len(df_r) > 0:
+        dow_rev = df_r.groupby("DayOfWeek")["Revenue"].sum()
+        best_dow = dow_rev.idxmax()
+        worst_dow = dow_rev.idxmin()
+        hr_rev = df_r.groupby("Hour")["Revenue"].sum()
+        ph = int(hr_rev.idxmax())
+        top3h = hr_rev.nlargest(3).index.tolist()
         parts.append(
-            "The most popular payment method is {m}, accounting for roughly {p}% of your revenue. "
-            "Make sure your {m} terminal is always working and settlement is checked daily.".format(
-                m=top_pay, p=pay_pct
+            "<b>{d}</b> is your highest-revenue day; <b>{wd}</b> is your slowest -- "
+            "consider a mid-week flash sale or a small discount on {wd} to even out footfall. "
+            "Your peak selling window is <b>{h}:00-{h1}:00</b>, with strong traffic also at "
+            "{h2}:00-{h3}:00. Never be understaffed during these windows.".format(
+                d=best_dow, wd=worst_dow,
+                h=ph, h1=ph+1,
+                h2=top3h[1], h3=top3h[1]+1
             )
         )
 
+    # ── Para 5: Payment methods ──
+    pay_col_r = next((c for c in ["Payment","Payment_Method","payment"] if c in df_r.columns), None)
+    if pay_col_r and len(df_r) > 0 and "Revenue" in df_r.columns:
+        pay_rev = df_r.groupby(pay_col_r)["Revenue"].sum().sort_values(ascending=False)
+        top_pay = pay_rev.index[0]
+        pay_pct = int(pay_rev.iloc[0] / pay_rev.sum() * 100)
+        second_pay = pay_rev.index[1] if len(pay_rev) > 1 else None
+        second_pct = int(pay_rev.iloc[1] / pay_rev.sum() * 100) if second_pay else 0
+        cash_val = pay_rev.get("Cash", 0)
+        cash_pct = int(cash_val / pay_rev.sum() * 100)
+        cash_note = ""
+        if cash_pct > 25:
+            cash_note = " Cash still makes up {c}% of transactions -- a small UPI incentive (5 Rs cashback) can shift customers digital and make reconciliation faster.".format(c=cash_pct)
+        parts.append(
+            "<b>{m}</b> is your top payment method at <b>{p}%</b>, followed by <b>{m2}</b> at {p2}%.{cn} "
+            "Keep all terminals charged and reconcile settlements daily.".format(
+                m=top_pay, p=pay_pct, m2=second_pay, p2=second_pct, cn=cash_note
+            )
+        )
+
+    # ── Para 6: Customer loyalty ──
     rr_val = None
     if "Customer" in df_r.columns and len(df_r) > 0:
         cf = df_r.groupby("Customer").size()
         rr_val = (cf > 1).mean() * 100
+        avg_visits = round(cf.mean(), 1)
         tc = df_r.groupby("Customer")["Revenue"].sum()
-        top_c, top_c_spend = tc.idxmax(), int(tc.max())
+        top_c_spend = int(tc.max())
         loyalty_note = (
-            "This is a healthy loyalty rate -- your regulars are a strong foundation."
+            "Your repeat rate is excellent -- regulars are your strongest asset."
+            if rr_val >= 50 else
+            "A healthy share of customers return. A loyalty programme could push this further."
             if rr_val >= 30 else
-            "There is room to grow -- a simple loyalty offer or WhatsApp follow-up can bring customers back."
+            "There is room to grow -- a simple loyalty card or post-purchase WhatsApp message can bring customers back."
             if rr_val >= 15 else
-            "Most customers are visiting only once. A loyalty programme or post-purchase message could significantly improve this."
+            "Most customers visit only once. A loyalty programme or follow-up message could significantly improve this."
         )
         parts.append(
-            "{r}% of your customers made more than one purchase this period. "
-            "{note} Your most valuable customer is {c}, with a total spend of Rs {s:,}.".format(
-                r=round(rr_val, 1), note=loyalty_note, c=top_c, s=top_c_spend
+            "<b>{r}%</b> of customers made more than one purchase, averaging <b>{av} visits</b> each. "
+            "{note} Your top customer spent <b>Rs {s:,}</b> -- "
+            "consider a VIP tier with early access to new stock to retain your highest-value buyers.".format(
+                r=round(rr_val, 1), av=avg_visits, note=loyalty_note, s=top_c_spend
             )
         )
 
+    # ── Para 7: ML Revenue Forecast ──
+    forecast_7 = forecast_30 = forecast_lo = forecast_hi = None
+    if len(df_raw_r) >= 60 and "Revenue" in df_raw_r.columns:
+        try:
+            fd = df_raw_r.copy()
+            fd["Date"] = pd.to_datetime(fd["Date"])
+            all_d = fd.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date").reset_index(drop=True)
+            all_d["DayIndex"] = range(len(all_d))
+            all_d["DOW"] = all_d["Date"].dt.dayofweek
+            dummies = pd.get_dummies(all_d["DOW"], prefix="dow", drop_first=True)
+            Xm = pd.concat([all_d[["DayIndex"]], dummies], axis=1).values
+            ym = all_d["Revenue"].values
+            mdl = _LR().fit(Xm, ym)
+            resid_std = _np.std(ym - mdl.predict(Xm))
+            last_idx = all_d["DayIndex"].max()
+            last_date = all_d["Date"].max()
+            fut_dates = [last_date + timedelta(days=i+1) for i in range(30)]
+            fut_rows = [{"DayIndex": last_idx+i+1, "DOW": d.dayofweek} for i, d in enumerate(fut_dates)]
+            fut_df = pd.DataFrame(fut_rows)
+            dow_fut = pd.get_dummies(fut_df["DOW"], prefix="dow")
+            for col in dummies.columns:
+                if col not in dow_fut.columns:
+                    dow_fut[col] = 0
+            dow_fut = dow_fut[dummies.columns]
+            X_fut = pd.concat([fut_df[["DayIndex"]], dow_fut], axis=1).values
+            y_fut = _np.maximum(mdl.predict(X_fut), 0)
+            forecast_7  = int(y_fut[:7].sum())
+            forecast_30 = int(y_fut.sum())
+            forecast_lo = int(max(forecast_30 - 1.28 * resid_std * 30, 0))
+            forecast_hi = int(forecast_30 + 1.28 * resid_std * 30)
+        except Exception:
+            pass
+
+    if forecast_7 is not None:
+        parts.append(
+            "Based on your historical sales patterns, the <b>next 7 days are forecast to generate "
+            "Rs {s7:,}</b>, and the <b>next 30 days Rs {s30:,}</b> "
+            "(80% confidence range: Rs {lo:,} to Rs {hi:,}). "
+            "Use these figures to plan your procurement budget and staff roster.".format(
+                s7=forecast_7, s30=forecast_30, lo=forecast_lo, hi=forecast_hi
+            )
+        )
+
+    # ── Para 8: Discount health ──
     disc_col_r = next((c for c in ["Discount_Pct","Discount","discount_pct"] if c in df_r.columns), None)
     disc_val = ((df_r[disc_col_r] > 0).mean() * 100) if disc_col_r else 0
+    if disc_val > 15:
+        avg_disc = round(df_r[disc_col_r].mean(), 1) if disc_col_r else 0
+        parts.append(
+            "<b>{d}%</b> of your bills included a discount with an average of <b>{ad}% off</b>. "
+            "Blanket discounts on every sale quietly erode margins. "
+            "Reserve discounts for bundles, slow movers, or loyalty customers -- "
+            "this keeps your average bill value healthy without losing footfall.".format(
+                d=int(disc_val), ad=avg_disc
+            )
+        )
 
+    # ── Key Recommendation ──
     if rr_val is not None and rr_val < 20:
         rec = (
             "Focus on customer retention. Only {r}% of customers returned this period. "
-            "A simple punch-card loyalty scheme, a 10% discount on the next visit, or a brief "
-            "WhatsApp message after purchase can double your repeat rate within weeks. "
-            "Keeping an existing customer is five times cheaper than finding a new one.".format(r=round(rr_val,1))
+            "A simple punch-card scheme, a 10% next-visit discount, or a brief WhatsApp message "
+            "after purchase can double your repeat rate within weeks. "
+            "Keeping an existing customer costs five times less than acquiring a new one.".format(r=round(rr_val,1))
         )
     elif disc_val > 35:
         rec = (
-            "Review your discount policy. Over {d}% of bills include a discount, directly cutting your margins. "
-            "Try replacing blanket discounts with bundle offers (buy 2 get 10% off) or loyalty rewards -- "
-            "you keep more revenue while still giving customers a reason to buy.".format(d=int(disc_val))
+            "Review your discount policy urgently. Over {d}% of bills include a discount. "
+            "Replace blanket discounts with bundle offers (buy 2 get 10% off) or a loyalty rewards card. "
+            "You keep more revenue per sale while still giving customers a reason to buy.".format(d=int(disc_val))
+        )
+    elif forecast_7 is not None and top_prod_name:
+        rec = (
+            "Your next 7-day forecast is Rs {s7:,}. Lead with <b>{p}</b> -- your top seller. "
+            "Make sure it is always in stock and at eye level. "
+            "A single stockout on a peak Sunday can cost more revenue than an entire slow weekday.".format(
+                s7=forecast_7, p=top_prod_name
+            )
         )
     elif top_prod_name:
         rec = (
-            "Double down on your best-seller: {p}. Never run out of stock on this item -- "
-            "stockouts on top-sellers are one of the most common causes of lost revenue. "
-            "Consider placing it at eye level near the entrance or checkout to drive impulse purchases.".format(
-                p=top_prod_name
-            )
+            "Double down on {p} -- your best-seller. Never run out of stock on this item. "
+            "Place it near the entrance or checkout counter to drive impulse purchases.".format(p=top_prod_name)
         )
     else:
         rec = (
@@ -1312,6 +1430,7 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
         )
 
     return parts, rec
+
 
 
 if "summary_generated" not in st.session_state:
