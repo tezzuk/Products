@@ -12,6 +12,21 @@ except ImportError:
     FPDF_AVAILABLE = False
 
 
+# ─────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────
+def sheets_to_csv_url(url: str) -> str:
+    """Convert any Google Sheets share/edit URL to a direct CSV export URL."""
+    import re as _re
+    m = _re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    if not m:
+        return url  # not recognised, pass through
+    sheet_id = m.group(1)
+    gid_m = _re.search(r"[#&?]gid=([0-9]+)", url)
+    gid = gid_m.group(1) if gid_m else "0"
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+
+
 # ══════════════════════════════════════════════════════
 # CLIENT CONFIG — add a new client by adding one entry
 # tier: "basic" | "standard" | "premium"
@@ -31,6 +46,14 @@ CLIENTS = {
     },
     # Add more clients here:
     # "rajelectronics": {"name": "Raj Electronics", "tier": "standard", "lang": "English", "alert_discount": 25},
+    # To auto-load from Google Sheets, add a sheets_url field:
+    # "gupta567": {
+    #     "name": "Gupta Traders",
+    #     "tier": "premium",
+    #     "lang": "English",
+    #     "alert_discount": 30,
+    #     "sheets_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0",
+    # },
 }
 
 TIER_LABEL = {"basic": "Basic", "standard": "Standard", "premium": "Premium"}
@@ -252,15 +275,50 @@ with st.sidebar:
         del st.session_state.client_config
         st.rerun()
     st.markdown("---")
-    st.markdown("**Upload Your Sales Data**")
-    st.caption("CSV or Excel with your sales records")
-    uploaded = st.file_uploader("", type=["csv","xlsx"])
-    if uploaded:
-        _mkey = "col_mapping_" + uploaded.name
-        if _mkey in st.session_state:
-            if st.button("🔄 Re-map Columns", use_container_width=True):
-                del st.session_state[_mkey]
+    _sheets_url = _cfg.get("sheets_url", "")
+    if _sheets_url:
+        # ── Google Sheets mode ──
+        st.markdown("**📊 Data Source**")
+        st.markdown(
+            "<div style='background:#1c2d3a;border:1px solid #1f6feb;border-radius:8px;"
+            "padding:8px 12px;margin-bottom:8px'>"
+            "<div style='color:#58a6ff;font-size:12px;font-weight:600'>✅ Connected to Google Sheets</div>"
+            "<div style='color:#8b949e;font-size:11px;margin-top:2px'>Auto-syncs when you refresh</div>"
+            "</div>",
+            unsafe_allow_html=True
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Refresh", use_container_width=True):
+                _sk = "sheets_df_" + _cname
+                for k in list(st.session_state.keys()):
+                    if k == _sk or k == "col_mapping__sheets_auto_.csv":
+                        del st.session_state[k]
                 st.rerun()
+        with col2:
+            if st.button("🔗 Open Sheet", use_container_width=True):
+                st.markdown(
+                    f'<a href="{_sheets_url}" target="_blank" style="display:none">open</a>',
+                    unsafe_allow_html=True
+                )
+                st.info("Link copied — open in browser")
+        with st.expander("⬆ Override with CSV", expanded=False):
+            uploaded = st.file_uploader("Upload CSV/Excel to override", type=["csv","xlsx"], key="csv_override")
+            if uploaded and "col_mapping_" + uploaded.name in st.session_state:
+                if st.button("🔄 Re-map Columns", use_container_width=True):
+                    del st.session_state["col_mapping_" + uploaded.name]
+                    st.rerun()
+    else:
+        # ── Manual upload mode ──
+        st.markdown("**Upload Your Sales Data**")
+        st.caption("CSV or Excel with your sales records")
+        uploaded = st.file_uploader("", type=["csv","xlsx"])
+        if uploaded:
+            _mkey = "col_mapping_" + uploaded.name
+            if _mkey in st.session_state:
+                if st.button("🔄 Re-map Columns", use_container_width=True):
+                    del st.session_state[_mkey]
+                    st.rerun()
     st.markdown("---")
 
     if _tier in ("standard", "premium"):
@@ -291,16 +349,40 @@ with st.sidebar:
     st.markdown("---")
     lang = st.radio("Summary Language", ["English", "Hinglish"], index=0 if _clang == "English" else 1)
     st.markdown("---")
-    st.caption("Demo mode — upload CSV to see real numbers.")
+    if not _sheets_url:
+        st.caption("Demo mode — upload CSV to see real numbers.")
 
 
 # ────────────────────────────────────────────
 # LOAD DATA
 # ────────────────────────────────────────────
+# Auto-load from Google Sheets if configured and no CSV override
+_sheets_cfg_url = _cfg.get("sheets_url", "")
+_SHEETS_KEY = "sheets_df_" + _cname
+if _sheets_cfg_url and _SHEETS_KEY not in st.session_state and not uploaded:
+    with st.spinner("Loading data from Google Sheets…"):
+        try:
+            _csv_url = sheets_to_csv_url(_sheets_cfg_url)
+            st.session_state[_SHEETS_KEY] = pd.read_csv(_csv_url)
+        except Exception as _se:
+            st.warning(f"⚠️ Could not load Google Sheets data: {_se}  \nPlease upload a CSV file.")
+
+# If sheets data loaded and no CSV override, use sheets data as the upload
+if not uploaded and _SHEETS_KEY in st.session_state:
+    import io as _io
+    _fake_buf = _io.BytesIO()
+    st.session_state[_SHEETS_KEY].to_csv(_fake_buf, index=False)
+    _fake_buf.seek(0)
+    _fake_buf.name = "_sheets_auto_.csv"
+    uploaded = _fake_buf
+
 if uploaded:
     try:
-        df_raw_upload = (pd.read_csv(uploaded) if uploaded.name.endswith(".csv")
-                         else pd.read_excel(uploaded))
+        _fname = getattr(uploaded, "name", "file.csv")
+        if _fname.endswith(".xlsx") or _fname.endswith(".xls"):
+            df_raw_upload = pd.read_excel(uploaded)
+        else:
+            df_raw_upload = pd.read_csv(uploaded)
     except Exception as e:
         st.error("Could not read file: " + str(e))
         st.stop()
