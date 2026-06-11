@@ -1205,8 +1205,9 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
         dr = dr.sort_values("Date")
         max_d = dr["Date"].max()
         split = max_d - pd.Timedelta(days=days_r)
+        split_prev = split - pd.Timedelta(days=days_r)
         this_p = dr[dr["Date"] > split]["Revenue"].sum()
-        prev_p = dr[dr["Date"] <= split]["Revenue"].sum()
+        prev_p = dr[(dr["Date"] > split_prev) & (dr["Date"] <= split)]["Revenue"].sum()
         if prev_p > 0:
             g = (this_p - prev_p) / prev_p * 100
             direction = "up" if g >= 0 else "down"
