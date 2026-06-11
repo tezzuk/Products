@@ -435,7 +435,7 @@ if uploaded:
     df_raw = df_raw_upload.rename(columns=rename_dict)
 
     if "DateTime" in df_raw.columns:
-        df_raw["DateTime"] = pd.to_datetime(df_raw["DateTime"], errors="coerce")
+        df_raw["DateTime"] = pd.to_datetime(df_raw["DateTime"], dayfirst=True, errors="coerce")
         df_raw["Date"]      = df_raw["DateTime"].dt.date
         df_raw["Hour"]      = df_raw["DateTime"].dt.hour
         df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
@@ -456,6 +456,7 @@ if uploaded:
 else:
     df_raw = make_sample()
     using_real = False
+    _qty_is_units = True  # demo data always has integer units
 
 # Ensure Date column is datetime64 so .max()/.min() work across all pandas versions
 # dayfirst=True handles DD-MM-YYYY format common in Indian/European datasets
@@ -477,9 +478,19 @@ if "Qty" in df_raw.columns:
         if _frac_pct > 0.1:
             _qty_is_units = False
 
-max_date = df_raw["Date"].max() if len(df_raw) > 0 else date.today()
+# Force max_date to be a proper datetime.date (handles numpy types, Timestamps, etc.)
+_raw_max = df_raw["Date"].max() if len(df_raw) > 0 else date.today()
+try:
+    max_date = pd.to_datetime(_raw_max).date()
+except Exception:
+    max_date = date.today()
 st.session_state["data_max_date"] = max_date
-st.session_state["data_min_date"] = df_raw["Date"].min()
+_raw_min = df_raw["Date"].min() if len(df_raw) > 0 else date.today()
+try:
+    _min_date_safe = pd.to_datetime(_raw_min).date()
+except Exception:
+    _min_date_safe = date.today()
+st.session_state["data_min_date"] = _min_date_safe
 
 
 # ────────────────────────────────────────────
