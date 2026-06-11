@@ -440,6 +440,10 @@ if uploaded:
         df_raw["Hour"]      = df_raw["DateTime"].dt.hour
         df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
         df_raw["DayNum"]    = df_raw["DateTime"].dt.dayofweek
+        # If all hours are 0, the source has no time component — drop Hour so
+        # downstream sections show "No data available" instead of just "12am"
+        if df_raw["Hour"].nunique() == 1 and df_raw["Hour"].iloc[0] == 0:
+            df_raw = df_raw.drop(columns=["Hour"])
 
     if "Revenue" not in df_raw.columns:
         if "Selling_Price" in df_raw.columns and "Qty" in df_raw.columns:
@@ -828,6 +832,8 @@ with col_hour:
         fig3.update_layout(**DARK, height=250, coloraxis_showscale=False)
         fig3.update_traces(marker_line_width=0)
         st.plotly_chart(fig3, use_container_width=True)
+    else:
+        st.info("⏰ No time data available — upload a file with a DateTime column to see hourly trends.")
 
 with col_dow2:
     st.markdown("#### Best Days of the Week")
