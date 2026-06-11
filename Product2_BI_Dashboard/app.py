@@ -501,8 +501,8 @@ if compare_mode and a_start and a_end and b_start and b_end:
 else:
     cutoff      = pd.Timestamp(max_date - timedelta(days=days))
     prev_cutoff = pd.Timestamp(max_date - timedelta(days=days*2))
-    df      = df_raw[df_raw["Date"] >= cutoff].copy()
-    df_prev = df_raw[(df_raw["Date"] >= prev_cutoff) & (df_raw["Date"] < cutoff)].copy()
+    df      = df_raw[df_raw["Date"] >= pd.Timestamp(cutoff)].copy()
+    df_prev = df_raw[(df_raw["Date"] >= pd.Timestamp(prev_cutoff)) & (df_raw["Date"] < pd.Timestamp(cutoff))].copy()
     df_b    = df_prev
 
 
@@ -700,8 +700,8 @@ alerts = []
 if len(df_raw) > 0 and "Product" in df_raw.columns:
     ref_cutoff_7   = max_date - timedelta(days=7)
     ref_cutoff_p30 = max_date - timedelta(days=37)
-    df_7   = df_raw[df_raw["Date"] >= ref_cutoff_7]
-    df_p30 = df_raw[(df_raw["Date"] >= ref_cutoff_p30) & (df_raw["Date"] < ref_cutoff_7)]
+    df_7   = df_raw[df_raw["Date"] >= pd.Timestamp(ref_cutoff_7)]
+    df_p30 = df_raw[(df_raw["Date"] >= pd.Timestamp(ref_cutoff_p30)) & (df_raw["Date"] < pd.Timestamp(ref_cutoff_7))]
 
     vel_30 = df_p30.groupby("Product")["Qty"].sum() / 30.0
     vel_7  = df_7.groupby("Product")["Qty"].sum() / 7.0
@@ -1170,7 +1170,7 @@ if _tier == 'premium':
             days_passed = today_date.day
             days_in_month = 30
             month_start = today_date.replace(day=1)
-            mtd_rev = int(df_raw[df_raw["Date"] >= month_start]["Revenue"].sum()) if len(df_raw) > 0 else 0
+            mtd_rev = int(df_raw[df_raw["Date"] >= pd.Timestamp(month_start)]["Revenue"].sum()) if len(df_raw) > 0 else 0
             projected_month = int(mtd_rev / max(days_passed, 1) * days_in_month) if days_passed > 0 else 0
     
             fc1, fc2, fc3 = st.columns(3)
@@ -1434,9 +1434,9 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
         max_d = dr["Date"].max()
         split = max_d - pd.Timedelta(days=days_r)
         split_prev = split - pd.Timedelta(days=days_r)
-        this_p = dr[dr["Date"] > split]["Revenue"].sum()
-        prev_p = dr[(dr["Date"] > split_prev) & (dr["Date"] <= split)]["Revenue"].sum()
-        prev_days = int((dr[(dr["Date"] > split_prev) & (dr["Date"] <= split)]["Date"].nunique()))
+        this_p = dr[dr["Date"] > pd.Timestamp(split)]["Revenue"].sum()
+        prev_p = dr[(dr["Date"] > pd.Timestamp(split_prev)) & (dr["Date"] <= pd.Timestamp(split))]["Revenue"].sum()
+        prev_days = int((dr[(dr["Date"] > pd.Timestamp(split_prev)) & (dr["Date"] <= pd.Timestamp(split))]["Date"].nunique()))
         if prev_p > 0 and prev_days >= 7:
             g = (this_p - prev_p) / prev_p * 100
             direction = "up" if g >= 0 else "down"
