@@ -819,20 +819,13 @@ if len(df_raw) > 0:
 # ── WEEKLY BAR ──
 st.markdown("---")
 st.markdown("#### Weekly Revenue (last 12 weeks)")
-def _fmt_week(p_str):
-    parts = p_str.split("/")
-    sd, ed = pd.to_datetime(parts[0]), pd.to_datetime(parts[1])
-    if sd.month == ed.month:
-        return sd.strftime("%b ") + str(sd.day) + "-" + str(ed.day)
-    return sd.strftime("%b ") + str(sd.day) + "-" + ed.strftime("%b ") + str(ed.day)
-
 dw2 = df_raw.copy()
-dw2["Date"]    = pd.to_datetime(dw2["Date"])
-dw2["_period"] = dw2["Date"].dt.to_period("W").astype(str)
-dw2["Week"]    = dw2["_period"].apply(_fmt_week)
-wk = dw2.groupby(["_period","Week"])["Revenue"].sum().reset_index().sort_values("_period").tail(12)
-fig5 = px.bar(wk, x="Week", y="Revenue", color_discrete_sequence=["#d2a8ff"],
-              labels={"Revenue":"Rs","Week":""}, category_orders={"Week": wk["Week"].tolist()})
+dw2["Date"] = pd.to_datetime(dw2["Date"])
+dw2["WeekStart"] = dw2["Date"].dt.to_period("W").apply(lambda p: p.start_time.date())
+wk = dw2.groupby("WeekStart")["Revenue"].sum().reset_index().sort_values("WeekStart").tail(12)
+wk["Label"] = wk["WeekStart"].apply(lambda d: d.strftime("%d %b %Y"))
+fig5 = px.bar(wk, x="Label", y="Revenue", color_discrete_sequence=["#d2a8ff"],
+              labels={"Revenue":"Rs","Label":""}, category_orders={"Label": wk["Label"].tolist()})
 fig5.update_layout(**DARK, height=220)
 fig5.update_traces(marker_line_width=0)
 st.plotly_chart(fig5, use_container_width=True)
