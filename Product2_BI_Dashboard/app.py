@@ -1458,7 +1458,10 @@ if st.session_state.summary_generated:
 
     if FPDF_AVAILABLE:
         def _build_pdf(paras, rec, sname):
+            import re as _re
             def clean(t):
+                # Strip HTML tags first
+                t = _re.sub(r"<[^>]+>", "", t)
                 # Reduce to ASCII-safe chars for fpdf built-in fonts
                 mapping = {
                     "\u2019": "'", "\u2018": "'",
