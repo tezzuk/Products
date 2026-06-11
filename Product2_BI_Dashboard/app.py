@@ -458,9 +458,24 @@ else:
     using_real = False
 
 # Ensure Date column is datetime64 so .max()/.min() work across all pandas versions
+# dayfirst=True handles DD-MM-YYYY format common in Indian/European datasets
+import re as _re
 if "Date" in df_raw.columns:
-    df_raw["Date"] = pd.to_datetime(df_raw["Date"], errors="coerce").dt.date
+    df_raw["Date"] = pd.to_datetime(df_raw["Date"], dayfirst=True, errors="coerce").dt.date
     df_raw = df_raw.dropna(subset=["Date"])
+
+# Strip leading/trailing whitespace AND normalize internal whitespace on all string columns
+for _col in df_raw.select_dtypes(include="object").columns:
+    df_raw[_col] = df_raw[_col].astype(str).apply(lambda s: _re.sub(r'\s+', " ", s.strip()))
+
+# Detect non-integer Qty (e.g. sales value column mistakenly mapped to Qty)
+_qty_is_units = True
+if "Qty" in df_raw.columns:
+    _qty_vals = pd.to_numeric(df_raw["Qty"], errors="coerce").dropna()
+    if len(_qty_vals) > 0:
+        _frac_pct = (_qty_vals != _qty_vals.round()).mean()
+        if _frac_pct > 0.1:
+            _qty_is_units = False
 
 max_date = df_raw["Date"].max() if len(df_raw) > 0 else date.today()
 st.session_state["data_max_date"] = max_date
@@ -590,7 +605,7 @@ prev_orders  = len(df_prev)
 ord_delta    = ((total_orders - prev_orders) / prev_orders * 100) if prev_orders > 0 else 0
 avg_order    = df["Revenue"].mean() if len(df) > 0 else 0
 uniq_cust    = df["Customer"].nunique() if "Customer" in df.columns else 0
-total_units  = int(df["Qty"].sum()) if "Qty" in df.columns else 0
+total_units  = int(df["Qty"].sum()) if ("Qty" in df.columns and _qty_is_units) else None
 
 if "Hour" in df.columns and len(df) > 0:
     bh = int(df.groupby("Hour")["Revenue"].sum().idxmax())
@@ -757,7 +772,7 @@ with m2:
 with m3:
     st.metric("Avg Bill Value", "Rs {:,}".format(int(avg_order)))
 with m4:
-    st.metric("Units Sold", "{:,}".format(total_units))
+    st.metric("Units Sold", "{:,}".format(total_units) if total_units is not None else "N/A")
 with m5:
     st.metric("Peak Hour", peak_str)
 with m6:
@@ -890,12 +905,12 @@ if _tier in ('standard', 'premium'):
     st.markdown("---")
     st.markdown("#### Stock Reorder Recommendations")
     st.caption("Based on average daily sales velocity over the selected period")
-    if "Qty" in df.columns and len(df) > 0:
+    if "Qty" in df.columns and _qty_is_units and len(df) > 0:
         vel = df.groupby("Product")["Qty"].sum() / max(days, 1)
         vel = vel.sort_values(ascending=False)
         top_fast    = vel.head(6)
         bottom_slow = vel[vel > 0].tail(5)
-        col_fast, col_slow2 = st.columns(2)
+        col_fast, col_slow2 = st.columns(2)  # col_slow2 used conditionally below
         with col_fast:
             st.markdown("**Order More (Fast Movers)**" if lang == "English" else "**Yeh Order Karein (Jaldi Bikne Wale)**")
             for prod, v in top_fast.items():
@@ -906,18 +921,27 @@ if _tier in ('standard', 'premium'):
                     "<div class='stock-action'>Reorder</div>"
                     "</div>", unsafe_allow_html=True
                 )
-        with col_slow2:
-            st.markdown("**Review Stock (Slow Movers)**" if lang == "English" else "**Stock Ghatayen (Dheere Bikne Wale)**")
-            for prod, v in bottom_slow.items():
-                st.markdown(
-                    "<div class='stock-card'>"
-                    "<div><div class='stock-name'>" + str(prod) + "</div>"
-                    "<div class='stock-vel'>" + str(round(v,2)) + " units/day -- consider discount or less stock</div></div>"
-                    "<div style='background:#2d1a00;color:#ffa657;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600'>Review</div>"
-                    "</div>", unsafe_allow_html=True
-                )
+        _fast_set = set(top_fast.index)
+        _slow_set = set(bottom_slow.index)
+        _overlap  = len(_fast_set & _slow_set) / max(len(_slow_set), 1)
+        _show_slow = _overlap < 0.6 and len(vel) > len(bottom_slow)
+        if _show_slow:
+            with col_slow2:
+                st.markdown("**Review Stock (Slow Movers)**" if lang == "English" else "**Stock Ghatayen (Dheere Bikne Wale)**")
+                for prod, v in bottom_slow.items():
+                    st.markdown(
+                        "<div class='stock-card'>"
+                        "<div><div class='stock-name'>" + str(prod) + "</div>"
+                        "<div class='stock-vel'>" + str(round(v,2)) + " units/day -- consider discount or less stock</div></div>"
+                        "<div style='background:#2d1a00;color:#ffa657;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600'>Review</div>"
+                        "</div>", unsafe_allow_html=True
+                    )
+        else:
+            st.info("Not enough product variety to identify slow movers separately.")
     
     
+    elif "Qty" in df.columns and not _qty_is_units:
+        st.info("ℹ️ Stock velocity requires integer unit counts. The Quantity column appears to contain decimal values — map a whole-number column for this section.")
 else:
     st.markdown('---')
     st.info('🔒 Stock Reorder Recommendations are available on Standard and Premium plans.')
@@ -926,21 +950,34 @@ st.markdown("---")
 col_prod, col_slow3 = st.columns(2)
 with col_prod:
     st.markdown("#### Top Selling Products")
-    ps = (df.groupby("Product")
-            .agg(Units=("Qty","sum"), Revenue=("Revenue","sum"), Bills=("Product","count"))
-            .sort_values("Revenue", ascending=False)
-            .head(15).reset_index())
+    if _qty_is_units and "Qty" in df.columns:
+        ps = (df.groupby("Product")
+                .agg(Units=("Qty","sum"), Revenue=("Revenue","sum"), Bills=("Product","count"))
+                .sort_values("Revenue", ascending=False)
+                .head(15).reset_index())
+    else:
+        ps = (df.groupby("Product")
+                .agg(Revenue=("Revenue","sum"), Bills=("Product","count"))
+                .sort_values("Revenue", ascending=False)
+                .head(15).reset_index())
     ps["Revenue"] = ps["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
     st.dataframe(ps, use_container_width=True, hide_index=True, height=300)
 
 with col_slow3:
     st.markdown("#### Bottom Sellers by Revenue (Consider Action)")
-    slow = (df.groupby("Product")
-              .agg(Units=("Qty","sum"), Revenue=("Revenue","sum"))
-              .sort_values("Revenue", ascending=True)
-              .head(10).reset_index())
-    slow["Revenue"] = slow["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
-    st.dataframe(slow, use_container_width=True, hide_index=True, height=300)
+    _n_prods = df["Product"].nunique() if "Product" in df.columns else 0
+    if _n_prods > 5:
+        _slow_agg = {"Revenue": ("Revenue","sum"), "Bills": ("Product","count")}
+        if _qty_is_units and "Qty" in df.columns:
+            _slow_agg["Units"] = ("Qty","sum")
+        slow = (df.groupby("Product")
+                  .agg(**_slow_agg)
+                  .sort_values("Revenue", ascending=True)
+                  .head(10).reset_index())
+        slow["Revenue"] = slow["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
+        st.dataframe(slow, use_container_width=True, hide_index=True, height=300)
+    else:
+        st.info("Too few products to show a meaningful bottom-sellers list.")
 
 
 if _tier in ('standard', 'premium'):
