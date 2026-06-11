@@ -1455,14 +1455,19 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
         hr_rev = df_r.groupby("Hour")["Revenue"].sum()
         ph = int(hr_rev.idxmax())
         top3h = hr_rev.nlargest(3).index.tolist()
+        if len(top3h) >= 2:
+            second_hour_txt = ", with strong traffic also at {h2}:00-{h3}:00".format(
+                h2=top3h[1], h3=top3h[1]+1)
+        else:
+            second_hour_txt = ""
         parts.append(
             "<b>{d}</b> is your highest-revenue day; <b>{wd}</b> is your slowest -- "
             "consider a mid-week flash sale or a small discount on {wd} to even out footfall. "
-            "Your peak selling window is <b>{h}:00-{h1}:00</b>, with strong traffic also at "
-            "{h2}:00-{h3}:00. Never be understaffed during these windows.".format(
+            "Your peak selling window is <b>{h}:00-{h1}:00</b>{sht}. "
+            "Never be understaffed during these windows.".format(
                 d=best_dow, wd=worst_dow,
                 h=ph, h1=ph+1,
-                h2=top3h[1], h3=top3h[1]+1
+                sht=second_hour_txt
             )
         )
 
