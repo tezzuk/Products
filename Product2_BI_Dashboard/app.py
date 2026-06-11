@@ -11,6 +11,30 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
+
+# ══════════════════════════════════════════════════════
+# CLIENT CONFIG — add a new client by adding one entry
+# tier: "basic" | "standard" | "premium"
+# ══════════════════════════════════════════════════════
+CLIENTS = {
+    "demo": {
+        "name": "Demo Store",
+        "tier": "premium",
+        "lang": "English",
+        "alert_discount": 30,
+    },
+    "sharma123": {
+        "name": "Sharma Retail Store",
+        "tier": "premium",
+        "lang": "English",
+        "alert_discount": 30,
+    },
+    # Add more clients here:
+    # "rajelectronics": {"name": "Raj Electronics", "tier": "standard", "lang": "English", "alert_discount": 25},
+}
+
+TIER_LABEL = {"basic": "Basic", "standard": "Standard", "premium": "Premium"}
+
 st.set_page_config(page_title="Retail Analytics Dashboard", page_icon="📊", layout="wide")
 
 st.markdown("""
@@ -80,6 +104,40 @@ hr { border-color: #30363d !important; }
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+
+# ── LOGIN GATE ──
+if "client_config" not in st.session_state:
+    st.markdown("""
+    <style>
+    .login-wrap { max-width: 400px; margin: 80px auto 0; }
+    .login-title { font-size: 32px; font-weight: 700; color: #e6edf3; margin-bottom: 4px; }
+    .login-sub { color: #8b949e; font-size: 15px; margin-bottom: 32px; }
+    </style>
+    <div class='login-wrap'>
+      <div class='login-title'>Retail Analytics</div>
+      <div class='login-sub'>Business Intelligence Dashboard</div>
+    </div>
+    """, unsafe_allow_html=True)
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        pwd = st.text_input("Enter your password", type="password", placeholder="Password provided by your administrator")
+        if st.button("Login", use_container_width=True, type="primary"):
+            if pwd in CLIENTS:
+                st.session_state.client_config = CLIENTS[pwd]
+                st.rerun()
+            else:
+                st.error("Invalid password. Please contact your administrator.")
+        st.caption("Need access? Contact: vanshtripathi2007@gmail.com")
+    st.stop()
+
+# ── LOAD CLIENT CONFIG ──
+_cfg   = st.session_state.client_config
+_tier  = _cfg["tier"]        # "basic" | "standard" | "premium"
+_cname = _cfg["name"]
+_clang = _cfg.get("lang", "English")
+_calert_disc = _cfg.get("alert_discount", 30)
 
 DARK = dict(
     plot_bgcolor="#161b22", paper_bgcolor="#0d1117", font_color="#e6edf3",
@@ -181,7 +239,18 @@ def _guess_cols(file_cols):
 with st.sidebar:
     st.markdown("## Retail Analytics")
     st.markdown("---")
-    shop_name = st.text_input("Shop / Mall Name", value="Sharma Retail Store")
+    shop_name = _cname
+    st.markdown(
+        "<div style='background:#21262d;border-radius:8px;padding:10px 14px;margin-bottom:8px'>"
+        "<div style='color:#8b949e;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase'>Logged in as</div>"
+        "<div style='color:#e6edf3;font-size:15px;font-weight:600;margin-top:2px'>" + _cname + "</div>"
+        "<div style='color:#58a6ff;font-size:11px;margin-top:2px'>" + TIER_LABEL[_tier] + " plan</div>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    if st.button("Logout", use_container_width=True):
+        del st.session_state.client_config
+        st.rerun()
     st.markdown("---")
     st.markdown("**Upload Your Sales Data**")
     st.caption("CSV or Excel with your sales records")
@@ -194,7 +263,11 @@ with st.sidebar:
                 st.rerun()
     st.markdown("---")
 
-    compare_mode = st.toggle("📊 Compare Periods", value=False)
+    if _tier in ("standard", "premium"):
+        compare_mode = st.toggle("📊 Compare Periods", value=False)
+    else:
+        compare_mode = False
+        st.caption("🔒 Compare Periods — Standard plan")
 
     if compare_mode:
         data_max = st.session_state.get("data_max_date", date.today())
@@ -216,7 +289,7 @@ with st.sidebar:
         days = {"Last 7 Days":7,"Last 30 Days":30,"Last 90 Days":90,"Full Year":365}[period]
 
     st.markdown("---")
-    lang = st.radio("Summary Language", ["English", "Hinglish"])
+    lang = st.radio("Summary Language", ["English", "Hinglish"], index=0 if _clang == "English" else 1)
     st.markdown("---")
     st.caption("Demo mode — upload CSV to see real numbers.")
 
@@ -686,67 +759,75 @@ with col_dow2:
         st.plotly_chart(fig4, use_container_width=True)
 
 
-# ══════════════════════════════════════════════
-# SECTION 3: STAFF SCHEDULING
-# ══════════════════════════════════════════════
-st.markdown("---")
-st.markdown("#### Staff Scheduling Recommendation")
-if "Hour" in df.columns and "DayOfWeek" in df.columns and len(df) > 0:
-    hd = df.groupby(["DayOfWeek","Hour"])["Revenue"].agg(["sum","count"]).reset_index()
-    hd.columns = ["DayOfWeek","Hour","Revenue","Transactions"]
-    hd = hd.sort_values("Transactions", ascending=False).head(5)
-    def fh2(h):
-        if h == 0: return "12am"
-        if h < 12: return str(h)+"am"
-        if h == 12: return "12pm"
-        return str(h-12)+"pm"
-    staff_cols = st.columns(len(hd))
-    for i, (_, row) in enumerate(hd.iterrows()):
-        with staff_cols[i]:
-            st.markdown(
-                "<div class='insight-box' style='text-align:center'>"
-                "<div class='insight-title'>Keep Extra Staff</div>"
-                "<div class='insight-val'>" + str(row["DayOfWeek"])[:3] + " " + fh2(int(row["Hour"])) + "</div>"
-                "<div class='insight-sub'>" + str(int(row["Transactions"])) + " avg bills</div>"
-                "</div>",
-                unsafe_allow_html=True
-            )
+if _tier in ('standard', 'premium'):
+    # ══════════════════════════════════════════════
+    # SECTION 3: STAFF SCHEDULING
+    # ══════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("#### Staff Scheduling Recommendation")
+    if "Hour" in df.columns and "DayOfWeek" in df.columns and len(df) > 0:
+        hd = df.groupby(["DayOfWeek","Hour"])["Revenue"].agg(["sum","count"]).reset_index()
+        hd.columns = ["DayOfWeek","Hour","Revenue","Transactions"]
+        hd = hd.sort_values("Transactions", ascending=False).head(5)
+        def fh2(h):
+            if h == 0: return "12am"
+            if h < 12: return str(h)+"am"
+            if h == 12: return "12pm"
+            return str(h-12)+"pm"
+        staff_cols = st.columns(len(hd))
+        for i, (_, row) in enumerate(hd.iterrows()):
+            with staff_cols[i]:
+                st.markdown(
+                    "<div class='insight-box' style='text-align:center'>"
+                    "<div class='insight-title'>Keep Extra Staff</div>"
+                    "<div class='insight-val'>" + str(row["DayOfWeek"])[:3] + " " + fh2(int(row["Hour"])) + "</div>"
+                    "<div class='insight-sub'>" + str(int(row["Transactions"])) + " avg bills</div>"
+                    "</div>",
+                    unsafe_allow_html=True
+                )
+    else:
+        st.info("Add DateTime column to get staff scheduling recommendations.")
+    
+    
 else:
-    st.info("Add DateTime column to get staff scheduling recommendations.")
-
-
-# ── SECTION 4: STOCK REORDER ──
-st.markdown("---")
-st.markdown("#### Stock Reorder Recommendations")
-st.caption("Based on average daily sales velocity over the selected period")
-if "Qty" in df.columns and len(df) > 0:
-    vel = df.groupby("Product")["Qty"].sum() / max(days, 1)
-    vel = vel.sort_values(ascending=False)
-    top_fast    = vel.head(6)
-    bottom_slow = vel[vel > 0].tail(5)
-    col_fast, col_slow2 = st.columns(2)
-    with col_fast:
-        st.markdown("**Order More (Fast Movers)**" if lang == "English" else "**Yeh Order Karein (Jaldi Bikne Wale)**")
-        for prod, v in top_fast.items():
-            st.markdown(
-                "<div class='stock-card'>"
-                "<div><div class='stock-name'>" + str(prod) + "</div>"
-                "<div class='stock-vel'>" + str(round(v,1)) + " units/day &rarr; ~" + str(int(v*7)) + " needed/week</div></div>"
-                "<div class='stock-action'>Reorder</div>"
-                "</div>", unsafe_allow_html=True
-            )
-    with col_slow2:
-        st.markdown("**Review Stock (Slow Movers)**" if lang == "English" else "**Stock Ghatayen (Dheere Bikne Wale)**")
-        for prod, v in bottom_slow.items():
-            st.markdown(
-                "<div class='stock-card'>"
-                "<div><div class='stock-name'>" + str(prod) + "</div>"
-                "<div class='stock-vel'>" + str(round(v,2)) + " units/day -- consider discount or less stock</div></div>"
-                "<div style='background:#2d1a00;color:#ffa657;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600'>Review</div>"
-                "</div>", unsafe_allow_html=True
-            )
-
-
+    st.markdown('---')
+    st.info('🔒 Staff Scheduling is available on Standard and Premium plans.')
+if _tier in ('standard', 'premium'):
+    # ── SECTION 4: STOCK REORDER ──
+    st.markdown("---")
+    st.markdown("#### Stock Reorder Recommendations")
+    st.caption("Based on average daily sales velocity over the selected period")
+    if "Qty" in df.columns and len(df) > 0:
+        vel = df.groupby("Product")["Qty"].sum() / max(days, 1)
+        vel = vel.sort_values(ascending=False)
+        top_fast    = vel.head(6)
+        bottom_slow = vel[vel > 0].tail(5)
+        col_fast, col_slow2 = st.columns(2)
+        with col_fast:
+            st.markdown("**Order More (Fast Movers)**" if lang == "English" else "**Yeh Order Karein (Jaldi Bikne Wale)**")
+            for prod, v in top_fast.items():
+                st.markdown(
+                    "<div class='stock-card'>"
+                    "<div><div class='stock-name'>" + str(prod) + "</div>"
+                    "<div class='stock-vel'>" + str(round(v,1)) + " units/day &rarr; ~" + str(int(v*7)) + " needed/week</div></div>"
+                    "<div class='stock-action'>Reorder</div>"
+                    "</div>", unsafe_allow_html=True
+                )
+        with col_slow2:
+            st.markdown("**Review Stock (Slow Movers)**" if lang == "English" else "**Stock Ghatayen (Dheere Bikne Wale)**")
+            for prod, v in bottom_slow.items():
+                st.markdown(
+                    "<div class='stock-card'>"
+                    "<div><div class='stock-name'>" + str(prod) + "</div>"
+                    "<div class='stock-vel'>" + str(round(v,2)) + " units/day -- consider discount or less stock</div></div>"
+                    "<div style='background:#2d1a00;color:#ffa657;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600'>Review</div>"
+                    "</div>", unsafe_allow_html=True
+                )
+    
+    
+else:
+    st.markdown('---')
+    st.info('🔒 Stock Reorder Recommendations are available on Standard and Premium plans.')
 # ── PRODUCT TABLES ──
 st.markdown("---")
 col_prod, col_slow3 = st.columns(2)
@@ -769,20 +850,24 @@ with col_slow3:
     st.dataframe(slow, use_container_width=True, hide_index=True, height=300)
 
 
-# ── PAYMENT SPLIT ──
-st.markdown("---")
-pay_col2 = next((c for c in ["Payment","Payment_Method","payment"] if c in df.columns), None)
-if pay_col2:
-    col_pay, col_dummy = st.columns(2)
-    with col_pay:
-        st.markdown("#### Payment Method Split")
-        pay = df.groupby(pay_col2)["Revenue"].sum().reset_index()
-        fig6 = px.pie(pay, values="Revenue", names=pay_col2, color_discrete_sequence=COLORS, hole=0.4)
-        fig6.update_layout(**DARK_NO_AX, height=250, showlegend=True, legend=dict(font=dict(color="#8b949e")))
-        fig6.update_traces(textposition="inside", textinfo="percent+label", textfont=dict(color="white"))
-        st.plotly_chart(fig6, use_container_width=True)
-
-
+if _tier in ('standard', 'premium'):
+    # ── PAYMENT SPLIT ──
+    st.markdown("---")
+    pay_col2 = next((c for c in ["Payment","Payment_Method","payment"] if c in df.columns), None)
+    if pay_col2:
+        col_pay, col_dummy = st.columns(2)
+        with col_pay:
+            st.markdown("#### Payment Method Split")
+            pay = df.groupby(pay_col2)["Revenue"].sum().reset_index()
+            fig6 = px.pie(pay, values="Revenue", names=pay_col2, color_discrete_sequence=COLORS, hole=0.4)
+            fig6.update_layout(**DARK_NO_AX, height=250, showlegend=True, legend=dict(font=dict(color="#8b949e")))
+            fig6.update_traces(textposition="inside", textinfo="percent+label", textfont=dict(color="white"))
+            st.plotly_chart(fig6, use_container_width=True)
+    
+    
+else:
+    st.markdown('---')
+    st.info('🔒 Payment Method Analysis is available on Standard and Premium plans.')
 # ── MONTHLY COMPARISON TABLE ──
 st.markdown("---")
 st.markdown("#### Monthly Performance Comparison")
@@ -833,345 +918,349 @@ st.plotly_chart(fig5, use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════
-# SECTION ML: FORECASTING, DEMAND, ANOMALY DETECTION
-# ══════════════════════════════════════════════════════
-import numpy as np
-from sklearn.linear_model import LinearRegression
-
-st.markdown("---")
-st.markdown("## ML Analytics & Predictions")
-st.caption("Powered by machine learning on your historical data. Requires at least 60 days of data for accuracy.")
-
-ml_tab1, ml_tab2, ml_tab3 = st.tabs(["Revenue Forecast", "Product Demand", "Anomaly Detection"])
-
-
-# ──────────────────────────────────────────────────────
-# TAB 1: REVENUE FORECAST
-# ──────────────────────────────────────────────────────
-with ml_tab1:
-    st.markdown("#### Revenue Forecast — Next 30 Days")
-    st.caption("Uses linear trend + day-of-week seasonality learned from your historical data")
-
-    # Need at least 60 days
-    all_daily = df_raw.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
-    all_daily["Date"] = pd.to_datetime(all_daily["Date"])
-    all_daily = all_daily.sort_values("Date").reset_index(drop=True)
-
-    if len(all_daily) < 30:
-        st.warning("Need at least 30 days of data for forecasting. Upload more historical data.")
-    else:
-        # Feature engineering: day index + day of week dummies
-        all_daily["DayIndex"] = range(len(all_daily))
-        all_daily["DOW"] = all_daily["Date"].dt.dayofweek
-
-        # Build feature matrix: trend + 6 day-of-week dummies (drop Monday as base)
-        dow_dummies = pd.get_dummies(all_daily["DOW"], prefix="dow", drop_first=True)
-        X = pd.concat([all_daily[["DayIndex"]], dow_dummies], axis=1).values
-        y = all_daily["Revenue"].values
-
-        model = LinearRegression()
-        model.fit(X, y)
-
-        # Residuals for confidence interval
-        y_pred_train = model.predict(X)
-        residuals = y - y_pred_train
-        std_resid = np.std(residuals)
-        z80 = 1.28  # 80% confidence interval
-
-        # Build future dates
-        last_idx = all_daily["DayIndex"].max()
-        last_date = all_daily["Date"].max()
-        future_dates = [last_date + timedelta(days=i+1) for i in range(30)]
-        future_rows = []
-        for i, fd in enumerate(future_dates):
-            row = {"DayIndex": last_idx + i + 1, "DOW": fd.dayofweek}
-            future_rows.append(row)
-        future_df = pd.DataFrame(future_rows)
-        dow_fut = pd.get_dummies(future_df["DOW"], prefix="dow")
-        for col in dow_dummies.columns:
-            if col not in dow_fut.columns:
-                dow_fut[col] = 0
-        dow_fut = dow_fut[dow_dummies.columns]
-        X_fut = pd.concat([future_df[["DayIndex"]], dow_fut], axis=1).values
-        y_fut = model.predict(X_fut)
-        y_fut = np.maximum(y_fut, 0)
-        y_upper = y_fut + z80 * std_resid
-        y_lower = np.maximum(y_fut - z80 * std_resid, 0)
-
-        # Plot: historical + forecast + confidence band
-        fig_fc = go.Figure()
-
-        # Historical (last 90 days only for readability)
-        hist_plot = all_daily.tail(90)
-        fig_fc.add_trace(go.Scatter(
-            x=hist_plot["Date"], y=hist_plot["Revenue"],
-            name="Historical", mode="lines",
-            line=dict(color="#58a6ff", width=1.5)
-        ))
-
-        # Confidence band
-        fig_fc.add_trace(go.Scatter(
-            x=future_dates + future_dates[::-1],
-            y=list(y_upper) + list(y_lower[::-1]),
-            fill="toself", fillcolor="rgba(255,166,87,0.12)",
-            line=dict(color="rgba(0,0,0,0)"),
-            name="80% Confidence Range", showlegend=True
-        ))
-
-        # Forecast line
-        fig_fc.add_trace(go.Scatter(
-            x=future_dates, y=y_fut,
-            name="Forecast", mode="lines",
-            line=dict(color="#ffa657", width=2.5, dash="dot")
-        ))
-
-        fig_fc.update_layout(**DARK, height=340,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#8b949e")),
-            shapes=[dict(type="line", x0=last_date, x1=last_date, y0=0, y1=1, xref="x", yref="paper",
-                         line=dict(color="#30363d", width=1, dash="dash"))]
-        )
-        st.plotly_chart(fig_fc, use_container_width=True)
-
-        # Summary cards
-        fc_7  = int(np.sum(y_fut[:7]))
-        fc_30 = int(np.sum(y_fut))
-        lo_7  = int(np.sum(y_lower[:7]))
-        hi_7  = int(np.sum(y_upper[:7]))
-        lo_30 = int(np.sum(y_lower))
-        hi_30 = int(np.sum(y_upper))
-
-        # Month-end projection
-        today_date = max_date
-        days_passed = today_date.day
-        days_in_month = 30
-        month_start = today_date.replace(day=1)
-        mtd_rev = int(df_raw[df_raw["Date"] >= month_start]["Revenue"].sum()) if len(df_raw) > 0 else 0
-        projected_month = int(mtd_rev / max(days_passed, 1) * days_in_month) if days_passed > 0 else 0
-
-        fc1, fc2, fc3 = st.columns(3)
-        with fc1:
-            st.markdown(
-                "<div class='insight-box'>"
-                "<div class='insight-title'>Next 7 Days (Forecast)</div>"
-                "<div class='insight-val'>Rs {:,}</div>".format(fc_7) +
-                "<div class='insight-sub'>Range: Rs {:,} - Rs {:,}</div>".format(lo_7, hi_7) +
-                "</div>", unsafe_allow_html=True
-            )
-        with fc2:
-            st.markdown(
-                "<div class='insight-box'>"
-                "<div class='insight-title'>Next 30 Days (Forecast)</div>"
-                "<div class='insight-val'>Rs {:,}</div>".format(fc_30) +
-                "<div class='insight-sub'>Range: Rs {:,} - Rs {:,}</div>".format(lo_30, hi_30) +
-                "</div>", unsafe_allow_html=True
-            )
-        with fc3:
-            st.markdown(
-                "<div class='insight-box'>"
-                "<div class='insight-title'>This Month Projection</div>"
-                "<div class='insight-val'>Rs {:,}</div>".format(projected_month) +
-                "<div class='insight-sub'>Based on Rs {:,} earned so far ({} days)</div>".format(mtd_rev, days_passed) +
-                "</div>", unsafe_allow_html=True
-            )
-
-        if lang == "Hinglish":
-            st.info("Agli 7 din mein estimated revenue: Rs {:,} se Rs {:,} ke beech (80% probability)".format(lo_7, hi_7))
+if _tier == 'premium':
+    # SECTION ML: FORECASTING, DEMAND, ANOMALY DETECTION
+    # ══════════════════════════════════════════════════════
+    import numpy as np
+    from sklearn.linear_model import LinearRegression
+    
+    st.markdown("---")
+    st.markdown("## ML Analytics & Predictions")
+    st.caption("Powered by machine learning on your historical data. Requires at least 60 days of data for accuracy.")
+    
+    ml_tab1, ml_tab2, ml_tab3 = st.tabs(["Revenue Forecast", "Product Demand", "Anomaly Detection"])
+    
+    
+    # ──────────────────────────────────────────────────────
+    # TAB 1: REVENUE FORECAST
+    # ──────────────────────────────────────────────────────
+    with ml_tab1:
+        st.markdown("#### Revenue Forecast — Next 30 Days")
+        st.caption("Uses linear trend + day-of-week seasonality learned from your historical data")
+    
+        # Need at least 60 days
+        all_daily = df_raw.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
+        all_daily["Date"] = pd.to_datetime(all_daily["Date"])
+        all_daily = all_daily.sort_values("Date").reset_index(drop=True)
+    
+        if len(all_daily) < 30:
+            st.warning("Need at least 30 days of data for forecasting. Upload more historical data.")
         else:
-            st.info("Next 7 days: Rs {:,} to Rs {:,} with 80% confidence. Plan your stock and staff accordingly.".format(lo_7, hi_7))
-
-
-# ──────────────────────────────────────────────────────
-# TAB 2: PRODUCT DEMAND PREDICTION
-# ──────────────────────────────────────────────────────
-with ml_tab2:
-    st.markdown("#### Product Demand Prediction — Next 7 Days")
-    st.caption("Predicts units to sell per product based on day-of-week patterns from historical data")
-
-    if "Product" not in df_raw.columns or "Qty" not in df_raw.columns:
-        st.warning("Need Product and Qty columns in your data.")
-    elif len(df_raw) < 30:
-        st.warning("Need at least 30 days of data.")
-    else:
-        # For each product: average units per day-of-week
-        df_raw2 = df_raw.copy()
-        df_raw2["Date"] = pd.to_datetime(df_raw2["Date"])
-        df_raw2["DOW"] = df_raw2["Date"].dt.dayofweek
-        df_raw2["DOWName"] = df_raw2["Date"].dt.strftime("%A")
-
-        prod_dow = df_raw2.groupby(["Product","DOW"])["Qty"].mean().reset_index()
-        prod_dow.columns = ["Product","DOW","AvgQty"]
-
-        # Next 7 days
-        next7 = [(max_date + timedelta(days=i+1)) for i in range(7)]
-        next7_dow = [d.weekday() for d in next7]
-        next7_names = [d.strftime("%a %d %b") for d in next7]
-
-        # For each product, predict next 7 days
-        products_list = df_raw2["Product"].unique()
-        demand_rows = []
-        for prod in products_list:
-            pdata = prod_dow[prod_dow["Product"] == prod].set_index("DOW")["AvgQty"]
-            weekly_pred = 0
-            for dow in next7_dow:
-                avg = pdata.get(dow, pdata.mean() if len(pdata) > 0 else 0)
-                weekly_pred += avg
-            demand_rows.append({"Product": prod, "Predicted_Units_Next_7d": round(weekly_pred, 1)})
-
-        demand_df = pd.DataFrame(demand_rows).sort_values("Predicted_Units_Next_7d", ascending=False)
-
-        # Show top and bottom
-        col_dem1, col_dem2 = st.columns(2)
-        with col_dem1:
-            st.markdown("**Top 8 — Stock Up This Week**")
-            top8 = demand_df.head(8).reset_index(drop=True)
-            fig_dem = px.bar(top8, x="Predicted_Units_Next_7d", y="Product",
-                orientation="h", color="Predicted_Units_Next_7d",
-                color_continuous_scale=["#21262d","#3fb950"],
-                labels={"Predicted_Units_Next_7d": "Predicted Units", "Product": ""})
-            fig_dem.update_layout(**DARK, height=320, coloraxis_showscale=False)
-            fig_dem.update_traces(marker_line_width=0)
-            st.plotly_chart(fig_dem, use_container_width=True)
-
-        with col_dem2:
-            st.markdown("**Day-by-Day Prediction (Top 5 Products)**")
-            top5_prods = demand_df.head(5)["Product"].tolist()
-            day_pred_rows = []
-            for prod in top5_prods:
+            # Feature engineering: day index + day of week dummies
+            all_daily["DayIndex"] = range(len(all_daily))
+            all_daily["DOW"] = all_daily["Date"].dt.dayofweek
+    
+            # Build feature matrix: trend + 6 day-of-week dummies (drop Monday as base)
+            dow_dummies = pd.get_dummies(all_daily["DOW"], prefix="dow", drop_first=True)
+            X = pd.concat([all_daily[["DayIndex"]], dow_dummies], axis=1).values
+            y = all_daily["Revenue"].values
+    
+            model = LinearRegression()
+            model.fit(X, y)
+    
+            # Residuals for confidence interval
+            y_pred_train = model.predict(X)
+            residuals = y - y_pred_train
+            std_resid = np.std(residuals)
+            z80 = 1.28  # 80% confidence interval
+    
+            # Build future dates
+            last_idx = all_daily["DayIndex"].max()
+            last_date = all_daily["Date"].max()
+            future_dates = [last_date + timedelta(days=i+1) for i in range(30)]
+            future_rows = []
+            for i, fd in enumerate(future_dates):
+                row = {"DayIndex": last_idx + i + 1, "DOW": fd.dayofweek}
+                future_rows.append(row)
+            future_df = pd.DataFrame(future_rows)
+            dow_fut = pd.get_dummies(future_df["DOW"], prefix="dow")
+            for col in dow_dummies.columns:
+                if col not in dow_fut.columns:
+                    dow_fut[col] = 0
+            dow_fut = dow_fut[dow_dummies.columns]
+            X_fut = pd.concat([future_df[["DayIndex"]], dow_fut], axis=1).values
+            y_fut = model.predict(X_fut)
+            y_fut = np.maximum(y_fut, 0)
+            y_upper = y_fut + z80 * std_resid
+            y_lower = np.maximum(y_fut - z80 * std_resid, 0)
+    
+            # Plot: historical + forecast + confidence band
+            fig_fc = go.Figure()
+    
+            # Historical (last 90 days only for readability)
+            hist_plot = all_daily.tail(90)
+            fig_fc.add_trace(go.Scatter(
+                x=hist_plot["Date"], y=hist_plot["Revenue"],
+                name="Historical", mode="lines",
+                line=dict(color="#58a6ff", width=1.5)
+            ))
+    
+            # Confidence band
+            fig_fc.add_trace(go.Scatter(
+                x=future_dates + future_dates[::-1],
+                y=list(y_upper) + list(y_lower[::-1]),
+                fill="toself", fillcolor="rgba(255,166,87,0.12)",
+                line=dict(color="rgba(0,0,0,0)"),
+                name="80% Confidence Range", showlegend=True
+            ))
+    
+            # Forecast line
+            fig_fc.add_trace(go.Scatter(
+                x=future_dates, y=y_fut,
+                name="Forecast", mode="lines",
+                line=dict(color="#ffa657", width=2.5, dash="dot")
+            ))
+    
+            fig_fc.update_layout(**DARK, height=340,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#8b949e")),
+                shapes=[dict(type="line", x0=last_date, x1=last_date, y0=0, y1=1, xref="x", yref="paper",
+                             line=dict(color="#30363d", width=1, dash="dash"))]
+            )
+            st.plotly_chart(fig_fc, use_container_width=True)
+    
+            # Summary cards
+            fc_7  = int(np.sum(y_fut[:7]))
+            fc_30 = int(np.sum(y_fut))
+            lo_7  = int(np.sum(y_lower[:7]))
+            hi_7  = int(np.sum(y_upper[:7]))
+            lo_30 = int(np.sum(y_lower))
+            hi_30 = int(np.sum(y_upper))
+    
+            # Month-end projection
+            today_date = max_date
+            days_passed = today_date.day
+            days_in_month = 30
+            month_start = today_date.replace(day=1)
+            mtd_rev = int(df_raw[df_raw["Date"] >= month_start]["Revenue"].sum()) if len(df_raw) > 0 else 0
+            projected_month = int(mtd_rev / max(days_passed, 1) * days_in_month) if days_passed > 0 else 0
+    
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                st.markdown(
+                    "<div class='insight-box'>"
+                    "<div class='insight-title'>Next 7 Days (Forecast)</div>"
+                    "<div class='insight-val'>Rs {:,}</div>".format(fc_7) +
+                    "<div class='insight-sub'>Range: Rs {:,} - Rs {:,}</div>".format(lo_7, hi_7) +
+                    "</div>", unsafe_allow_html=True
+                )
+            with fc2:
+                st.markdown(
+                    "<div class='insight-box'>"
+                    "<div class='insight-title'>Next 30 Days (Forecast)</div>"
+                    "<div class='insight-val'>Rs {:,}</div>".format(fc_30) +
+                    "<div class='insight-sub'>Range: Rs {:,} - Rs {:,}</div>".format(lo_30, hi_30) +
+                    "</div>", unsafe_allow_html=True
+                )
+            with fc3:
+                st.markdown(
+                    "<div class='insight-box'>"
+                    "<div class='insight-title'>This Month Projection</div>"
+                    "<div class='insight-val'>Rs {:,}</div>".format(projected_month) +
+                    "<div class='insight-sub'>Based on Rs {:,} earned so far ({} days)</div>".format(mtd_rev, days_passed) +
+                    "</div>", unsafe_allow_html=True
+                )
+    
+            if lang == "Hinglish":
+                st.info("Agli 7 din mein estimated revenue: Rs {:,} se Rs {:,} ke beech (80% probability)".format(lo_7, hi_7))
+            else:
+                st.info("Next 7 days: Rs {:,} to Rs {:,} with 80% confidence. Plan your stock and staff accordingly.".format(lo_7, hi_7))
+    
+    
+    # ──────────────────────────────────────────────────────
+    # TAB 2: PRODUCT DEMAND PREDICTION
+    # ──────────────────────────────────────────────────────
+    with ml_tab2:
+        st.markdown("#### Product Demand Prediction — Next 7 Days")
+        st.caption("Predicts units to sell per product based on day-of-week patterns from historical data")
+    
+        if "Product" not in df_raw.columns or "Qty" not in df_raw.columns:
+            st.warning("Need Product and Qty columns in your data.")
+        elif len(df_raw) < 30:
+            st.warning("Need at least 30 days of data.")
+        else:
+            # For each product: average units per day-of-week
+            df_raw2 = df_raw.copy()
+            df_raw2["Date"] = pd.to_datetime(df_raw2["Date"])
+            df_raw2["DOW"] = df_raw2["Date"].dt.dayofweek
+            df_raw2["DOWName"] = df_raw2["Date"].dt.strftime("%A")
+    
+            prod_dow = df_raw2.groupby(["Product","DOW"])["Qty"].mean().reset_index()
+            prod_dow.columns = ["Product","DOW","AvgQty"]
+    
+            # Next 7 days
+            next7 = [(max_date + timedelta(days=i+1)) for i in range(7)]
+            next7_dow = [d.weekday() for d in next7]
+            next7_names = [d.strftime("%a %d %b") for d in next7]
+    
+            # For each product, predict next 7 days
+            products_list = df_raw2["Product"].unique()
+            demand_rows = []
+            for prod in products_list:
                 pdata = prod_dow[prod_dow["Product"] == prod].set_index("DOW")["AvgQty"]
-                row = {"Product": prod}
-                for j, (d, dname) in enumerate(zip(next7_dow, next7_names)):
-                    avg = pdata.get(d, pdata.mean() if len(pdata) > 0 else 0)
-                    row[dname] = round(avg, 1)
-                day_pred_rows.append(row)
-
-            day_pred_df = pd.DataFrame(day_pred_rows).set_index("Product")
-            st.dataframe(day_pred_df, use_container_width=True, height=220)
-            st.caption("Numbers = predicted units to sell each day")
-
-        # Plain-English recommendation
-        top_prod_dem = demand_df.iloc[0]["Product"] if len(demand_df) > 0 else "N/A"
-        top_units = demand_df.iloc[0]["Predicted_Units_Next_7d"] if len(demand_df) > 0 else 0
-        if lang == "Hinglish":
-            st.success("Is hafte sabse zyada bikne wala item: **" + str(top_prod_dem) + "** (~" + str(int(top_units)) + " units). Stock ready rakhein!")
+                weekly_pred = 0
+                for dow in next7_dow:
+                    avg = pdata.get(dow, pdata.mean() if len(pdata) > 0 else 0)
+                    weekly_pred += avg
+                demand_rows.append({"Product": prod, "Predicted_Units_Next_7d": round(weekly_pred, 1)})
+    
+            demand_df = pd.DataFrame(demand_rows).sort_values("Predicted_Units_Next_7d", ascending=False)
+    
+            # Show top and bottom
+            col_dem1, col_dem2 = st.columns(2)
+            with col_dem1:
+                st.markdown("**Top 8 — Stock Up This Week**")
+                top8 = demand_df.head(8).reset_index(drop=True)
+                fig_dem = px.bar(top8, x="Predicted_Units_Next_7d", y="Product",
+                    orientation="h", color="Predicted_Units_Next_7d",
+                    color_continuous_scale=["#21262d","#3fb950"],
+                    labels={"Predicted_Units_Next_7d": "Predicted Units", "Product": ""})
+                fig_dem.update_layout(**DARK, height=320, coloraxis_showscale=False)
+                fig_dem.update_traces(marker_line_width=0)
+                st.plotly_chart(fig_dem, use_container_width=True)
+    
+            with col_dem2:
+                st.markdown("**Day-by-Day Prediction (Top 5 Products)**")
+                top5_prods = demand_df.head(5)["Product"].tolist()
+                day_pred_rows = []
+                for prod in top5_prods:
+                    pdata = prod_dow[prod_dow["Product"] == prod].set_index("DOW")["AvgQty"]
+                    row = {"Product": prod}
+                    for j, (d, dname) in enumerate(zip(next7_dow, next7_names)):
+                        avg = pdata.get(d, pdata.mean() if len(pdata) > 0 else 0)
+                        row[dname] = round(avg, 1)
+                    day_pred_rows.append(row)
+    
+                day_pred_df = pd.DataFrame(day_pred_rows).set_index("Product")
+                st.dataframe(day_pred_df, use_container_width=True, height=220)
+                st.caption("Numbers = predicted units to sell each day")
+    
+            # Plain-English recommendation
+            top_prod_dem = demand_df.iloc[0]["Product"] if len(demand_df) > 0 else "N/A"
+            top_units = demand_df.iloc[0]["Predicted_Units_Next_7d"] if len(demand_df) > 0 else 0
+            if lang == "Hinglish":
+                st.success("Is hafte sabse zyada bikne wala item: **" + str(top_prod_dem) + "** (~" + str(int(top_units)) + " units). Stock ready rakhein!")
+            else:
+                st.success("Top predicted seller this week: **" + str(top_prod_dem) + "** (~" + str(int(top_units)) + " units). Make sure you have enough stock!")
+    
+    
+    # ──────────────────────────────────────────────────────
+    # TAB 3: ANOMALY DETECTION
+    # ──────────────────────────────────────────────────────
+    with ml_tab3:
+        st.markdown("#### Anomaly Detection — Unusual Revenue Days")
+        st.caption("Flags days where revenue was statistically unusual (more than 2 standard deviations from rolling average)")
+    
+        all_daily2 = df_raw.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
+        all_daily2["Date"] = pd.to_datetime(all_daily2["Date"])
+    
+        if len(all_daily2) < 14:
+            st.warning("Need at least 14 days of data for anomaly detection.")
         else:
-            st.success("Top predicted seller this week: **" + str(top_prod_dem) + "** (~" + str(int(top_units)) + " units). Make sure you have enough stock!")
-
-
-# ──────────────────────────────────────────────────────
-# TAB 3: ANOMALY DETECTION
-# ──────────────────────────────────────────────────────
-with ml_tab3:
-    st.markdown("#### Anomaly Detection — Unusual Revenue Days")
-    st.caption("Flags days where revenue was statistically unusual (more than 2 standard deviations from rolling average)")
-
-    all_daily2 = df_raw.groupby("Date")["Revenue"].sum().reset_index().sort_values("Date")
-    all_daily2["Date"] = pd.to_datetime(all_daily2["Date"])
-
-    if len(all_daily2) < 14:
-        st.warning("Need at least 14 days of data for anomaly detection.")
-    else:
-        # Rolling 30-day mean and std
-        all_daily2["Roll_Mean"] = all_daily2["Revenue"].rolling(30, min_periods=7, center=True).mean()
-        all_daily2["Roll_Std"]  = all_daily2["Revenue"].rolling(30, min_periods=7, center=True).std()
-        all_daily2["Roll_Mean"] = all_daily2["Roll_Mean"].fillna(all_daily2["Revenue"].mean())
-        all_daily2["Roll_Std"]  = all_daily2["Roll_Std"].fillna(all_daily2["Revenue"].std())
-        all_daily2["ZScore"]    = (all_daily2["Revenue"] - all_daily2["Roll_Mean"]) / all_daily2["Roll_Std"].replace(0, 1)
-        all_daily2["Anomaly"]   = all_daily2["ZScore"].abs() > 2.0
-        all_daily2["Spike"]     = all_daily2["ZScore"] > 2.0
-        all_daily2["Drop"]      = all_daily2["ZScore"] < -2.0
-
-        spikes = all_daily2[all_daily2["Spike"]]
-        drops  = all_daily2[all_daily2["Drop"]]
-
-        # Chart
-        fig_an = go.Figure()
-
-        # Normal days
-        normal = all_daily2[~all_daily2["Anomaly"]]
-        fig_an.add_trace(go.Scatter(
-            x=normal["Date"], y=normal["Revenue"],
-            mode="lines", name="Normal",
-            line=dict(color="#58a6ff", width=1.5)
-        ))
-
-        # Rolling mean band
-        fig_an.add_trace(go.Scatter(
-            x=list(all_daily2["Date"]) + list(all_daily2["Date"])[::-1],
-            y=list(all_daily2["Roll_Mean"] + 2*all_daily2["Roll_Std"]) + list((all_daily2["Roll_Mean"] - 2*all_daily2["Roll_Std"]).clip(0))[::-1],
-            fill="toself", fillcolor="rgba(88,166,255,0.06)",
-            line=dict(color="rgba(0,0,0,0)"),
-            name="Normal Range", showlegend=True
-        ))
-
-        fig_an.add_trace(go.Scatter(
-            x=all_daily2["Date"], y=all_daily2["Roll_Mean"],
-            mode="lines", name="Rolling Avg",
-            line=dict(color="#8b949e", width=1, dash="dot")
-        ))
-
-        # Spike markers
-        if len(spikes) > 0:
+            # Rolling 30-day mean and std
+            all_daily2["Roll_Mean"] = all_daily2["Revenue"].rolling(30, min_periods=7, center=True).mean()
+            all_daily2["Roll_Std"]  = all_daily2["Revenue"].rolling(30, min_periods=7, center=True).std()
+            all_daily2["Roll_Mean"] = all_daily2["Roll_Mean"].fillna(all_daily2["Revenue"].mean())
+            all_daily2["Roll_Std"]  = all_daily2["Roll_Std"].fillna(all_daily2["Revenue"].std())
+            all_daily2["ZScore"]    = (all_daily2["Revenue"] - all_daily2["Roll_Mean"]) / all_daily2["Roll_Std"].replace(0, 1)
+            all_daily2["Anomaly"]   = all_daily2["ZScore"].abs() > 2.0
+            all_daily2["Spike"]     = all_daily2["ZScore"] > 2.0
+            all_daily2["Drop"]      = all_daily2["ZScore"] < -2.0
+    
+            spikes = all_daily2[all_daily2["Spike"]]
+            drops  = all_daily2[all_daily2["Drop"]]
+    
+            # Chart
+            fig_an = go.Figure()
+    
+            # Normal days
+            normal = all_daily2[~all_daily2["Anomaly"]]
             fig_an.add_trace(go.Scatter(
-                x=spikes["Date"], y=spikes["Revenue"],
-                mode="markers", name="Spike",
-                marker=dict(color="#3fb950", size=10, symbol="triangle-up")
+                x=normal["Date"], y=normal["Revenue"],
+                mode="lines", name="Normal",
+                line=dict(color="#58a6ff", width=1.5)
             ))
-
-        # Drop markers
-        if len(drops) > 0:
+    
+            # Rolling mean band
             fig_an.add_trace(go.Scatter(
-                x=drops["Date"], y=drops["Revenue"],
-                mode="markers", name="Drop",
-                marker=dict(color="#f85149", size=10, symbol="triangle-down")
+                x=list(all_daily2["Date"]) + list(all_daily2["Date"])[::-1],
+                y=list(all_daily2["Roll_Mean"] + 2*all_daily2["Roll_Std"]) + list((all_daily2["Roll_Mean"] - 2*all_daily2["Roll_Std"]).clip(0))[::-1],
+                fill="toself", fillcolor="rgba(88,166,255,0.06)",
+                line=dict(color="rgba(0,0,0,0)"),
+                name="Normal Range", showlegend=True
             ))
-
-        fig_an.update_layout(**DARK, height=350,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#8b949e"))
-        )
-        st.plotly_chart(fig_an, use_container_width=True)
-
-        # Anomaly table
-        an_col1, an_col2 = st.columns(2)
-        with an_col1:
-            st.markdown("**Revenue Spikes (unusually HIGH)**")
+    
+            fig_an.add_trace(go.Scatter(
+                x=all_daily2["Date"], y=all_daily2["Roll_Mean"],
+                mode="lines", name="Rolling Avg",
+                line=dict(color="#8b949e", width=1, dash="dot")
+            ))
+    
+            # Spike markers
             if len(spikes) > 0:
-                sp_show = spikes[["Date","Revenue","ZScore"]].copy()
-                sp_show["Revenue"] = sp_show["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
-                sp_show["ZScore"]  = sp_show["ZScore"].apply(lambda x: "+" + str(round(x,1)) + " SD")
-                sp_show["Date"] = sp_show["Date"].dt.strftime("%d %b %Y")
-                st.dataframe(sp_show, use_container_width=True, hide_index=True)
-                if lang == "Hinglish":
-                    st.caption("In dino mein kuch special tha — sale, festival, ya zyada customers. Analyze karein aur dobara karein!")
-                else:
-                    st.caption("Something special happened on these days — sale event, festival, or unusual footfall. Try to replicate it!")
-            else:
-                st.info("No unusual spikes found.")
-
-        with an_col2:
-            st.markdown("**Revenue Drops (unusually LOW)**")
+                fig_an.add_trace(go.Scatter(
+                    x=spikes["Date"], y=spikes["Revenue"],
+                    mode="markers", name="Spike",
+                    marker=dict(color="#3fb950", size=10, symbol="triangle-up")
+                ))
+    
+            # Drop markers
             if len(drops) > 0:
-                dr_show = drops[["Date","Revenue","ZScore"]].copy()
-                dr_show["Revenue"] = dr_show["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
-                dr_show["ZScore"]  = dr_show["ZScore"].apply(lambda x: str(round(x,1)) + " SD")
-                dr_show["Date"] = dr_show["Date"].dt.strftime("%d %b %Y")
-                st.dataframe(dr_show, use_container_width=True, hide_index=True)
-                if lang == "Hinglish":
-                    st.caption("In dino mein kuch galat tha — band dukan, power cut, ya aur kuch. Wajah dhundhein.")
+                fig_an.add_trace(go.Scatter(
+                    x=drops["Date"], y=drops["Revenue"],
+                    mode="markers", name="Drop",
+                    marker=dict(color="#f85149", size=10, symbol="triangle-down")
+                ))
+    
+            fig_an.update_layout(**DARK, height=350,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#8b949e"))
+            )
+            st.plotly_chart(fig_an, use_container_width=True)
+    
+            # Anomaly table
+            an_col1, an_col2 = st.columns(2)
+            with an_col1:
+                st.markdown("**Revenue Spikes (unusually HIGH)**")
+                if len(spikes) > 0:
+                    sp_show = spikes[["Date","Revenue","ZScore"]].copy()
+                    sp_show["Revenue"] = sp_show["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
+                    sp_show["ZScore"]  = sp_show["ZScore"].apply(lambda x: "+" + str(round(x,1)) + " SD")
+                    sp_show["Date"] = sp_show["Date"].dt.strftime("%d %b %Y")
+                    st.dataframe(sp_show, use_container_width=True, hide_index=True)
+                    if lang == "Hinglish":
+                        st.caption("In dino mein kuch special tha — sale, festival, ya zyada customers. Analyze karein aur dobara karein!")
+                    else:
+                        st.caption("Something special happened on these days — sale event, festival, or unusual footfall. Try to replicate it!")
                 else:
-                    st.caption("Something went wrong on these days — shop closure, power cut, billing issue. Investigate the cause.")
+                    st.info("No unusual spikes found.")
+    
+            with an_col2:
+                st.markdown("**Revenue Drops (unusually LOW)**")
+                if len(drops) > 0:
+                    dr_show = drops[["Date","Revenue","ZScore"]].copy()
+                    dr_show["Revenue"] = dr_show["Revenue"].apply(lambda x: "Rs {:,}".format(int(x)))
+                    dr_show["ZScore"]  = dr_show["ZScore"].apply(lambda x: str(round(x,1)) + " SD")
+                    dr_show["Date"] = dr_show["Date"].dt.strftime("%d %b %Y")
+                    st.dataframe(dr_show, use_container_width=True, hide_index=True)
+                    if lang == "Hinglish":
+                        st.caption("In dino mein kuch galat tha — band dukan, power cut, ya aur kuch. Wajah dhundhein.")
+                    else:
+                        st.caption("Something went wrong on these days — shop closure, power cut, billing issue. Investigate the cause.")
+                else:
+                    st.info("No unusual drops found.")
+    
+            # Summary
+            total_anomalies = len(spikes) + len(drops)
+            anomaly_pct = round(total_anomalies / len(all_daily2) * 100, 1)
+            if lang == "Hinglish":
+                st.info("Kul " + str(total_anomalies) + " anomaly mile (" + str(anomaly_pct) + "% din). " +
+                    str(len(spikes)) + " spike aur " + str(len(drops)) + " drop.")
             else:
-                st.info("No unusual drops found.")
-
-        # Summary
-        total_anomalies = len(spikes) + len(drops)
-        anomaly_pct = round(total_anomalies / len(all_daily2) * 100, 1)
-        if lang == "Hinglish":
-            st.info("Kul " + str(total_anomalies) + " anomaly mile (" + str(anomaly_pct) + "% din). " +
-                str(len(spikes)) + " spike aur " + str(len(drops)) + " drop.")
-        else:
-            st.info("Found " + str(total_anomalies) + " anomalous days (" + str(anomaly_pct) + "% of all days): " +
-                str(len(spikes)) + " spikes and " + str(len(drops)) + " drops.")
-
+                st.info("Found " + str(total_anomalies) + " anomalous days (" + str(anomaly_pct) + "% of all days): " +
+                    str(len(spikes)) + " spikes and " + str(len(drops)) + " drops.")
+    
+else:
+    st.markdown('---')
+    st.info('🔒 ML Analytics (Revenue Forecast, Demand Prediction, Anomaly Detection) is available on the Premium plan.')
 # ── EXPORT ──
 st.markdown("---")
 _, col_dl = st.columns([3,1])
@@ -1457,7 +1546,7 @@ if st.session_state.summary_generated:
         unsafe_allow_html=True
     )
 
-    if FPDF_AVAILABLE:
+    if FPDF_AVAILABLE and _tier == "premium":
         def _build_pdf(paras, rec, sname):
             import re as _re
             def clean(t):
@@ -1535,5 +1624,7 @@ if st.session_state.summary_generated:
             file_name=shop_name.replace(" ","_") + "_report_" + datetime.now().strftime("%Y%m%d") + ".pdf",
             mime="application/pdf",
         )
+    elif _tier != "premium":
+        st.info("🔒 PDF report download is available on the Premium plan.")
     else:
         st.caption("Install fpdf2 to enable PDF download: pip install fpdf2")
