@@ -400,7 +400,7 @@ with c1:
     label = "Your real data" if using_real else "Demo - sample retail data"
     st.caption(label + " | Updated: " + datetime.now().strftime("%d %b %Y, %I:%M %p"))
 with c2:
-    if not using_real:
+    if not using_real and _cfg.get("name") == "Demo Store":
         st.info("Demo Mode")
 
 st.markdown("---")
