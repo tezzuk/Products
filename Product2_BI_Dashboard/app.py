@@ -1385,12 +1385,15 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
         split_prev = split - pd.Timedelta(days=days_r)
         this_p = dr[dr["Date"] > split]["Revenue"].sum()
         prev_p = dr[(dr["Date"] > split_prev) & (dr["Date"] <= split)]["Revenue"].sum()
-        if prev_p > 0:
+        prev_days = int((dr[(dr["Date"] > split_prev) & (dr["Date"] <= split)]["Date"].nunique()))
+        if prev_p > 0 and prev_days >= 7:
             g = (this_p - prev_p) / prev_p * 100
             direction = "up" if g >= 0 else "down"
             growth_note = " Revenue is <b>{d} {p}%</b> compared to the equivalent previous period.".format(
                 d=direction, p=abs(round(g, 1))
             )
+        elif prev_p == 0 or prev_days < 7:
+            growth_note = " Not enough historical data to compare growth."
     parts.append(
         "<b>{shop}</b> generated a total revenue of <b>Rs {rev:,}</b> from <b>{bills:,} transactions</b> "
         "over the last {days} days, with an average bill value of <b>Rs {avg:,}</b>.{g}".format(
@@ -1439,16 +1442,21 @@ def _build_report_text(df_r, df_raw_r, shop_r, days_r):
                 cat_note = " <b>{cat}</b> leads your categories at {pct}% of revenue, followed by <b>{c2}</b> at {p2}%.".format(
                     cat=top_cat, pct=top_cat_pct, c2=second_cat, p2=second_cat_pct
                 )
+            top_set = set(t.index.tolist())
+            bot_set = set([b.index[-1], b.index[-2], b.index[-3]])
+            if top_set == bot_set or len(pr) <= 3:
+                slow_note = ""
+            else:
+                slow_note = (" Your slowest movers are <b>{b1}, {b2}, and {b3}</b> -- "
+                             "consider a clearance bundle or positioning them next to a fast-seller to move stock.".format(
+                                 b1=b.index[-1], b2=b.index[-2], b3=b.index[-3]))
             parts.append(
                 "Your top three products by revenue are <b>{p1}</b> (Rs {v1:,}), "
-                "<b>{p2}</b> (Rs {v2:,}), and <b>{p3}</b> (Rs {v3:,}).{cat} "
-                "Your slowest movers are <b>{b1}, {b2}, and {b3}</b> -- consider a clearance bundle "
-                "or positioning them next to a fast-seller to move stock.".format(
+                "<b>{p2}</b> (Rs {v2:,}), and <b>{p3}</b> (Rs {v3:,}).{cat}{slow}".format(
                     p1=t.index[0], v1=int(t.iloc[0]),
                     p2=t.index[1], v2=int(t.iloc[1]),
                     p3=t.index[2], v3=int(t.iloc[2]),
-                    b1=b.index[-1], b2=b.index[-2], b3=b.index[-3],
-                    cat=cat_note
+                    cat=cat_note, slow=slow_note
                 )
             )
         top_prod_name = pr.index[0] if len(pr) > 0 else None
