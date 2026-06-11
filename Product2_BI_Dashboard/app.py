@@ -457,7 +457,12 @@ else:
     df_raw = make_sample()
     using_real = False
 
-max_date = df_raw["Date"].max()
+# Ensure Date column is datetime64 so .max()/.min() work across all pandas versions
+if "Date" in df_raw.columns:
+    df_raw["Date"] = pd.to_datetime(df_raw["Date"], errors="coerce").dt.date
+    df_raw = df_raw.dropna(subset=["Date"])
+
+max_date = df_raw["Date"].max() if len(df_raw) > 0 else date.today()
 st.session_state["data_max_date"] = max_date
 st.session_state["data_min_date"] = df_raw["Date"].min()
 
