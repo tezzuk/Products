@@ -436,7 +436,7 @@ if uploaded:
 
     if "DateTime" in df_raw.columns:
         df_raw["DateTime"] = pd.to_datetime(df_raw["DateTime"], dayfirst=True, errors="coerce")
-        df_raw["Date"]      = df_raw["DateTime"].dt.date
+        df_raw["Date"]      = df_raw["DateTime"].dt.normalize()  # keep as datetime64, midnight
         df_raw["Hour"]      = df_raw["DateTime"].dt.hour
         df_raw["DayOfWeek"] = df_raw["DateTime"].dt.strftime("%A")
         df_raw["DayNum"]    = df_raw["DateTime"].dt.dayofweek
@@ -458,11 +458,11 @@ else:
     using_real = False
     _qty_is_units = True  # demo data always has integer units
 
-# Ensure Date column is datetime64 so .max()/.min() work across all pandas versions
+# Ensure Date column is datetime64[ns] for reliable comparisons on all pandas/Python versions
 # dayfirst=True handles DD-MM-YYYY format common in Indian/European datasets
 import re as _re
 if "Date" in df_raw.columns:
-    df_raw["Date"] = pd.to_datetime(df_raw["Date"], dayfirst=True, errors="coerce").dt.date
+    df_raw["Date"] = pd.to_datetime(df_raw["Date"], dayfirst=True, errors="coerce")
     df_raw = df_raw.dropna(subset=["Date"])
 
 # Strip leading/trailing whitespace AND normalize internal whitespace on all string columns
@@ -478,18 +478,16 @@ if "Qty" in df_raw.columns:
         if _frac_pct > 0.1:
             _qty_is_units = False
 
-# Force max_date to be a proper datetime.date (handles numpy types, Timestamps, etc.)
-_raw_max = df_raw["Date"].max() if len(df_raw) > 0 else date.today()
+# max_date / min_date as python date for sidebar date pickers
 try:
-    max_date = pd.to_datetime(_raw_max).date()
+    max_date = df_raw["Date"].max().date() if len(df_raw) > 0 else date.today()
 except Exception:
     max_date = date.today()
-st.session_state["data_max_date"] = max_date
-_raw_min = df_raw["Date"].min() if len(df_raw) > 0 else date.today()
 try:
-    _min_date_safe = pd.to_datetime(_raw_min).date()
+    _min_date_safe = df_raw["Date"].min().date() if len(df_raw) > 0 else date.today()
 except Exception:
     _min_date_safe = date.today()
+st.session_state["data_max_date"] = max_date
 st.session_state["data_min_date"] = _min_date_safe
 
 
@@ -497,12 +495,12 @@ st.session_state["data_min_date"] = _min_date_safe
 # PERIOD FILTERING
 # ────────────────────────────────────────────
 if compare_mode and a_start and a_end and b_start and b_end:
-    df      = df_raw[(df_raw["Date"] >= a_start) & (df_raw["Date"] <= a_end)].copy()
-    df_b    = df_raw[(df_raw["Date"] >= b_start) & (df_raw["Date"] <= b_end)].copy()
+    df      = df_raw[(df_raw["Date"] >= pd.Timestamp(a_start)) & (df_raw["Date"] <= pd.Timestamp(a_end))].copy()
+    df_b    = df_raw[(df_raw["Date"] >= pd.Timestamp(b_start)) & (df_raw["Date"] <= pd.Timestamp(b_end))].copy()
     df_prev = df_b
 else:
-    cutoff      = max_date - timedelta(days=days)
-    prev_cutoff = cutoff - timedelta(days=days)
+    cutoff      = pd.Timestamp(max_date - timedelta(days=days))
+    prev_cutoff = pd.Timestamp(max_date - timedelta(days=days*2))
     df      = df_raw[df_raw["Date"] >= cutoff].copy()
     df_prev = df_raw[(df_raw["Date"] >= prev_cutoff) & (df_raw["Date"] < cutoff)].copy()
     df_b    = df_prev
